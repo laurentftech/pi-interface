@@ -1,8 +1,10 @@
 /**
  * Pi-interface server: bridges a pi AgentSession to WebSocket clients.
  *
- * SECURITY: binds to 127.0.0.1 only. The agent has bash/edit/write tools —
- * exposing this server on a network would give remote shell access.
+ * SECURITY: binds to 127.0.0.1 only (protects against the network) and
+ * validates the Origin header on WebSocket upgrades (protects against
+ * malicious webpages in the user's own browser — WS is exempt from CORS).
+ * The agent has bash/edit/write tools: never weaken either check.
  */
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
@@ -138,6 +140,7 @@ function handleClientMessage(raw: string): void {
   }
   switch (message.type) {
     case "prompt": {
+      if (typeof message.text !== "string") return;
       const text = message.text.trim();
       if (!text) return;
       handlePrompt(text).catch((error: unknown) => {
@@ -156,7 +159,22 @@ function handleClientMessage(raw: string): void {
 const app = Fastify({ logger: false });
 await app.register(websocket);
 
-app.get("/ws", { websocket: true }, (socket) => {
+/**
+ * WebSocket connections are exempt from the same-origin policy: any webpage
+ * could otherwise connect to this localhost server and drive an agent that
+ * has bash/write tools. Only accept browser connections from local dev
+ * origins. Requests without an Origin header (non-browser clients: curl,
+ * native tools) are allowed — a local process already has shell access.
+ */
+const ORIGIN_ALLOWLIST = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+app.get("/ws", { websocket: true }, (socket, req) => {
+  const origin = req.headers.origin;
+  if (origin !== undefined && !ORIGIN_ALLOWLIST.test(origin)) {
+    console.warn(`[server] rejected ws connection from origin ${origin}`);
+    socket.close(1008, "forbidden origin");
+    return;
+  }
   clients.add(socket);
   send(socket, {
     type: "hello",
