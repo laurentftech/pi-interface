@@ -18,7 +18,8 @@ import type { ClientMessage, ServerMessage } from "./protocol.ts";
 
 const PORT = Number(process.env.PORT ?? 3141);
 const HOST = "127.0.0.1";
-const AGENT_CWD = process.env.PI_CWD ?? process.cwd();
+// npm workspace scripts run with cwd=server/ — INIT_CWD is where `npm run` was invoked
+const AGENT_CWD = process.env.PI_CWD ?? process.env.INIT_CWD ?? process.cwd();
 
 // --- Agent session ---------------------------------------------------------
 
