@@ -69,6 +69,7 @@ export default function App() {
           <Sidebar
             tree={state.fileTree}
             openFile={state.openFile}
+            writableRoot={state.writableRoot}
             onExpand={listDirectory}
             onSelectFile={readFile}
             onClosePreview={closeFilePreview}

@@ -30,6 +30,18 @@ export async function resolveBrowserRoot(config: AppConfig): Promise<string> {
   return fs.realpath(config.sandbox?.root ?? config.cwd);
 }
 
+/**
+ * Writable zone the browser should highlight, relative to `browserRoot` (posix
+ * separators): undefined when no sandbox is configured, null when the sandbox
+ * is entirely read-only, or the writable subtree's path ("" = the whole root).
+ */
+export async function resolveWritableRoot(config: AppConfig, browserRoot: string): Promise<string | null | undefined> {
+  if (!config.sandbox) return undefined;
+  if (!config.sandbox.allowWrite) return null;
+  const target = config.sandbox.writableRoot ? await fs.realpath(config.sandbox.writableRoot) : browserRoot;
+  return path.relative(browserRoot, target).split(path.sep).join("/");
+}
+
 /** Resolve a client-supplied relative path against root, rejecting anything that escapes it. */
 async function resolveConfined(root: string, relPath: string): Promise<string> {
   const target = path.resolve(root, relPath);

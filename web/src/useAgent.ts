@@ -59,6 +59,8 @@ export interface AgentState {
   editorPrefill: { text: string; nonce: number } | null;
   fileTree: Record<string, DirState>;
   openFile: OpenFile | null;
+  /** Writable zone in the file browser; see SessionSnapshot.writableRoot. */
+  writableRoot?: string | null;
 }
 
 const initialState: AgentState = {
@@ -151,6 +153,7 @@ function applySnapshot(state: AgentState, message: ServerMessage & { sessionId: 
     widgets: {},
     extensionTitle: undefined,
     editorPrefill: null,
+    writableRoot: message.writableRoot,
   };
 }
 

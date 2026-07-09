@@ -33,7 +33,7 @@ import {
 import path from "node:path";
 import { loadConfig } from "./config.ts";
 import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
-import { FileBrowserError, listDirectory, readFileForPreview, resolveBrowserRoot } from "./fileBrowser.ts";
+import { FileBrowserError, listDirectory, readFileForPreview, resolveBrowserRoot, resolveWritableRoot } from "./fileBrowser.ts";
 import { createSandboxedTools, isWithin, realResolve } from "./sandbox.ts";
 
 // npm workspace scripts run with cwd=server/ — INIT_CWD is where `npm run` was invoked
@@ -50,6 +50,7 @@ const SESSION_DIR = config.agentDir ? path.join(config.agentDir, "sessions") : u
 
 const sandboxedTools = config.sandbox ? await createSandboxedTools(config.sandbox) : undefined;
 const BROWSER_ROOT = await resolveBrowserRoot(config);
+const WRITABLE_ROOT = await resolveWritableRoot(config, BROWSER_ROOT);
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd,
@@ -158,6 +159,7 @@ function snapshot(): SessionSnapshot {
     models: availableModels(),
     commands: availableCommands(),
     contextUsage: contextUsage(),
+    writableRoot: WRITABLE_ROOT,
   };
 }
 

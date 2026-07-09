@@ -136,6 +136,12 @@ export interface SessionSnapshot {
   models: ModelChoice[];
   commands: CommandInfo[];
   contextUsage?: ContextUsage;
+  /**
+   * File-browser writable zone, relative to the browser root (posix separators):
+   * absent when no sandbox is configured (nothing to distinguish), `null` when the
+   * sandbox is entirely read-only, or the writable subtree's path ("" = the whole root).
+   */
+  writableRoot?: string | null;
 }
 
 /** Server -> client */
