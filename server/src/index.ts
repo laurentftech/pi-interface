@@ -400,13 +400,15 @@ async function bindExtensionsForSession(): Promise<void> {
   }
 }
 
+/** args of an in-flight edit/write call, captured at tool_execution_start and consumed at tool_execution_end. */
+const pendingFileMutations = new Map<string, unknown>();
+
 /**
  * Best-effort file-browser invalidation: if an edit/write tool touched a path inside
  * BROWSER_ROOT, tell clients so an expanded directory or open preview can refresh.
  * Not a security boundary — resolution failures or out-of-root paths are just skipped.
  */
-async function announceFileChange(toolName: string, args: unknown): Promise<void> {
-  if (toolName !== "edit" && toolName !== "write") return;
+async function announceFileChange(args: unknown): Promise<void> {
   const targetPath = (args as { path?: unknown } | null)?.path;
   if (typeof targetPath !== "string") return;
   try {
@@ -463,7 +465,9 @@ function bindSession(): () => void {
           toolName: event.toolName,
           args: event.args,
         });
-        void announceFileChange(event.toolName, event.args);
+        if (event.toolName === "edit" || event.toolName === "write") {
+          pendingFileMutations.set(event.toolCallId, event.args);
+        }
         break;
       case "tool_execution_update": {
         const text = contentText(event.partialResult?.content);
@@ -479,6 +483,13 @@ function bindSession(): () => void {
           isError: event.isError,
           text: truncate(contentText(event.result?.content)),
         });
+        {
+          const args = pendingFileMutations.get(event.toolCallId);
+          pendingFileMutations.delete(event.toolCallId);
+          // Only announce once the write has actually landed on disk — the client
+          // may otherwise refetch a directory/file before the change is visible.
+          if (args !== undefined && !event.isError) void announceFileChange(args);
+        }
         break;
       case "queue_update":
         broadcast({ type: "queue", steering: [...event.steering], followUp: [...event.followUp] });
