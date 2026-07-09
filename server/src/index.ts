@@ -6,6 +6,7 @@
  * malicious webpages in the user's own browser — WS is exempt from CORS).
  * The agent has bash/edit/write tools: never weaken either check.
  */
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
@@ -22,6 +23,8 @@ import {
   type ClientMessage,
   type CommandInfo,
   type ContextUsage,
+  type ExtensionUIRequest,
+  type ExtensionUIResponse,
   type ModelChoice,
   type ServerMessage,
   type SessionSnapshot,
@@ -171,6 +174,212 @@ function send(socket: WebSocket, message: ServerMessage): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
 }
 
+// --- Extension "Custom UI" bridge -----------------------------------------------
+// See https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#custom-ui
+// Mirrors pi's own RPC-mode ExtensionUIContext (dialogs forwarded as JSON, client
+// answers by id) but over the WebSocket instead of stdin/stdout, and broadcasts
+// to every connected tab — whichever client answers first resolves the request.
+
+type PendingExtensionRequest = { resolve: (response: ExtensionUIResponse) => void };
+const pendingExtensionRequests = new Map<string, PendingExtensionRequest>();
+
+/** Dialog helper: sends a request, resolves on the matching response, timeout, or abort. */
+function createDialogPromise<T>(
+  opts: { signal?: AbortSignal; timeout?: number } | undefined,
+  defaultValue: T,
+  request: Extract<ExtensionUIRequest, { method: "select" | "confirm" | "input" }>,
+  parseResponse: (response: ExtensionUIResponse) => T,
+): Promise<T> {
+  if (opts?.signal?.aborted) return Promise.resolve(defaultValue);
+  const id = request.id;
+  return new Promise((resolve) => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      opts?.signal?.removeEventListener("abort", onAbort);
+      pendingExtensionRequests.delete(id);
+    };
+    const onAbort = () => {
+      cleanup();
+      resolve(defaultValue);
+    };
+    opts?.signal?.addEventListener("abort", onAbort, { once: true });
+    if (opts?.timeout) {
+      timeoutId = setTimeout(() => {
+        cleanup();
+        resolve(defaultValue);
+      }, opts.timeout);
+    }
+    pendingExtensionRequests.set(id, {
+      resolve: (response) => {
+        cleanup();
+        resolve(parseResponse(response));
+      },
+    });
+    broadcast(request);
+  });
+}
+
+/**
+ * Build the ExtensionUIContext bound to the current AgentSession. TUI-only
+ * concerns (custom components, footers/headers, editor replacement, terminal
+ * input, themes) have no web equivalent and are no-ops, same as pi's own RPC
+ * mode — extensions relying on those still work in the pi CLI, just not here.
+ */
+function createExtensionUIContext() {
+  return {
+    select(title: string, options: string[], opts?: { signal?: AbortSignal; timeout?: number }) {
+      const id = randomUUID();
+      return createDialogPromise(opts, undefined, { type: "extension_ui_request", id, method: "select", title, options, timeout: opts?.timeout }, (r) =>
+        "cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined,
+      );
+    },
+    confirm(title: string, message: string, opts?: { signal?: AbortSignal; timeout?: number }) {
+      const id = randomUUID();
+      return createDialogPromise(opts, false, { type: "extension_ui_request", id, method: "confirm", title, message, timeout: opts?.timeout }, (r) =>
+        "cancelled" in r && r.cancelled ? false : "confirmed" in r ? r.confirmed : false,
+      );
+    },
+    input(title: string, placeholder?: string, opts?: { signal?: AbortSignal; timeout?: number }) {
+      const id = randomUUID();
+      return createDialogPromise(
+        opts,
+        undefined,
+        { type: "extension_ui_request", id, method: "input", title, placeholder, timeout: opts?.timeout },
+        (r) => ("cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined),
+      );
+    },
+    notify(message: string, notifyType?: "info" | "warning" | "error") {
+      broadcast({ type: "extension_ui_request", id: randomUUID(), method: "notify", message, notifyType });
+    },
+    onTerminalInput() {
+      // Raw terminal input has no web equivalent
+      return () => {};
+    },
+    setStatus(statusKey: string, statusText: string | undefined) {
+      broadcast({ type: "extension_ui_request", id: randomUUID(), method: "setStatus", statusKey, statusText });
+    },
+    setWorkingMessage() {},
+    setWorkingVisible() {},
+    setWorkingIndicator() {},
+    setHiddenThinkingLabel() {},
+    setWidget(
+      widgetKey: string,
+      content: string[] | undefined | ((...args: never[]) => unknown),
+      options?: { placement?: "aboveEditor" | "belowEditor" },
+    ) {
+      // Component factories need a TUI to render into — only string arrays are supported here
+      if (content === undefined || Array.isArray(content)) {
+        broadcast({
+          type: "extension_ui_request",
+          id: randomUUID(),
+          method: "setWidget",
+          widgetKey,
+          widgetLines: content,
+          widgetPlacement: options?.placement,
+        });
+      }
+    },
+    setFooter() {},
+    setHeader() {},
+    setTitle(title: string) {
+      broadcast({ type: "extension_ui_request", id: randomUUID(), method: "setTitle", title });
+    },
+    async custom() {
+      // Custom TUI components can't run in the browser
+      return undefined;
+    },
+    pasteToEditor(text: string) {
+      this.setEditorText(text);
+    },
+    setEditorText(text: string) {
+      broadcast({ type: "extension_ui_request", id: randomUUID(), method: "set_editor_text", text });
+    },
+    getEditorText() {
+      // Synchronous — can't wait on the client's current composer text
+      return "";
+    },
+    editor(title: string, prefill?: string): Promise<string | undefined> {
+      const id = randomUUID();
+      return new Promise((resolve) => {
+        pendingExtensionRequests.set(id, {
+          resolve: (response) => {
+            if ("cancelled" in response && response.cancelled) resolve(undefined);
+            else if ("value" in response) resolve(response.value);
+            else resolve(undefined);
+          },
+        });
+        broadcast({ type: "extension_ui_request", id, method: "editor", title, prefill });
+      });
+    },
+    addAutocompleteProvider() {},
+    setEditorComponent() {},
+    getEditorComponent() {
+      return undefined;
+    },
+    // Terminal ANSI theming has no web equivalent. Identity-returning stub (no
+    // colors) rather than throwing, in case an extension reads it defensively.
+    get theme() {
+      const identity = (_color: unknown, text: string) => text;
+      return {
+        fg: identity,
+        bg: identity,
+        bold: (text: string) => text,
+        italic: (text: string) => text,
+        underline: (text: string) => text,
+        inverse: (text: string) => text,
+        strikethrough: (text: string) => text,
+        getFgAnsi: () => "",
+        getBgAnsi: () => "",
+        getColorMode: () => "truecolor" as const,
+        getThinkingBorderColor: () => (text: string) => text,
+        getBashModeBorderColor: () => (text: string) => text,
+      };
+    },
+    getAllThemes() {
+      return [];
+    },
+    getTheme() {
+      return undefined;
+    },
+    setTheme() {
+      return { success: false, error: "Theme switching not supported in pi-interface" };
+    },
+    getToolsExpanded() {
+      return false;
+    },
+    setToolsExpanded() {},
+  };
+}
+
+/** Resolve a pending dialog/editor request the client just answered. */
+function handleExtensionUIResponse(response: ExtensionUIResponse): void {
+  const pending = pendingExtensionRequests.get(response.id);
+  if (!pending) return;
+  pendingExtensionRequests.delete(response.id);
+  pending.resolve(response);
+}
+
+/** (Re)bind the extension runtime — UI bridge, mode, error reporting — to the current session. */
+async function bindExtensionsForSession(): Promise<void> {
+  await runtime.session.bindExtensions({
+    // Cast: structurally satisfies ExtensionUIContext (verified against the SDK's
+    // own RPC-mode implementation); see the `theme` getter above for the one gap.
+    uiContext: createExtensionUIContext() as any,
+    mode: "rpc",
+    // Extensions can call ctx.abort() themselves; no override needed here.
+    // commandContextActions (fork/tree navigation) isn't wired up — out of scope for the UI bridge.
+    shutdownHandler: () => {
+      // Unlike pi's one-shot RPC subprocess, this server is long-lived and shared
+      // across tabs/sessions — an extension asking to "shut down" shouldn't kill it.
+      console.warn("[pi] extension requested shutdown — ignored (pi-interface is a persistent server)");
+    },
+    onError: (err) => {
+      reportError(new Error(`[extension ${err.extensionPath}] ${err.error}`));
+    },
+  });
+}
+
 // --- SDK events -> wire events -------------------------------------------------
 
 /** Event subscriptions attach to one AgentSession — rebind after replacement. */
@@ -251,11 +460,13 @@ function bindSession(): () => void {
 }
 
 let unsubscribe = bindSession();
+await bindExtensionsForSession();
 
 /** After runtime.newSession()/switchSession(), runtime.session is a new object. */
-function rebindAndAnnounce(): void {
+async function rebindAndAnnounce(): Promise<void> {
   unsubscribe();
   unsubscribe = bindSession();
+  await bindExtensionsForSession();
   broadcast({ type: "session_replaced", ...snapshot() });
   console.log(`[pi] session ${runtime.session.sessionId}`);
 }
@@ -276,13 +487,13 @@ async function replaceSession(socket: WebSocket, action: () => Promise<{ cancell
   replacingSession = true;
   try {
     const { cancelled } = await action();
-    if (!cancelled) rebindAndAnnounce();
+    if (!cancelled) await rebindAndAnnounce();
   } catch (error) {
     reportError(error);
     // The old session may be disposed — land on a fresh one instead
     try {
       const { cancelled } = await runtime.newSession();
-      if (!cancelled) rebindAndAnnounce();
+      if (!cancelled) await rebindAndAnnounce();
     } catch (recoveryError) {
       reportError(recoveryError);
     }
@@ -416,6 +627,9 @@ function handleClientMessage(socket: WebSocket, raw: string): void {
     case "compact":
       // Failures surface via the compaction_end event (errorMessage) — avoid double-reporting.
       runtime.session.compact().catch(() => {});
+      break;
+    case "extension_ui_response":
+      handleExtensionUIResponse(message);
       break;
   }
 }

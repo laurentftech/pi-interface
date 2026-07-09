@@ -9,6 +9,8 @@ interface HeaderProps {
   connected: boolean;
   theme: "light" | "dark";
   showThemeToggle: boolean;
+  /** Extension setStatus() key/text pairs — see extensions.md#custom-ui. */
+  statuses: Record<string, string>;
   onToggleTheme: () => void;
   onNewSession: () => void;
   onSwitchSession: (path: string) => void;
@@ -123,6 +125,15 @@ export function Header(props: HeaderProps) {
           working
         </span>
       )}
+
+      {Object.entries(props.statuses).map(([key, text]) => (
+        <span
+          key={key}
+          className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400"
+        >
+          {text}
+        </span>
+      ))}
 
       <div className="ml-auto flex items-center gap-2">
         {props.showThemeToggle && <ThemeToggle theme={props.theme} onToggle={props.onToggleTheme} />}

@@ -5,6 +5,7 @@ import type {
   ClientMessage,
   CommandInfo,
   ContextUsage,
+  ExtensionUIRequest,
   ModelChoice,
   ServerMessage,
   SessionSummary,
@@ -13,6 +14,18 @@ import type {
 
 type AssistantItem = Extract<ChatItem, { kind: "assistant" }>;
 type ToolItem = Extract<ChatItem, { kind: "tool" }>;
+
+/** Extension "Custom UI" dialog requests — need a client answer (select/confirm/input/editor). */
+export type DialogRequest = Extract<ExtensionUIRequest, { method: "select" | "confirm" | "input" | "editor" }>;
+export interface ExtensionNotification {
+  id: string;
+  message: string;
+  notifyType?: "info" | "warning" | "error";
+}
+export interface ExtensionWidget {
+  lines: string[];
+  placement: "aboveEditor" | "belowEditor";
+}
 
 export interface AgentState {
   connected: boolean;
@@ -30,6 +43,12 @@ export interface AgentState {
   errors: string[];
   contextUsage: ContextUsage | null;
   isCompacting: boolean;
+  dialogQueue: DialogRequest[];
+  notifications: ExtensionNotification[];
+  statuses: Record<string, string>;
+  widgets: Record<string, ExtensionWidget>;
+  extensionTitle?: string;
+  editorPrefill: { text: string; nonce: number } | null;
 }
 
 const initialState: AgentState = {
@@ -48,9 +67,19 @@ const initialState: AgentState = {
   errors: [],
   contextUsage: null,
   isCompacting: false,
+  dialogQueue: [],
+  notifications: [],
+  statuses: {},
+  widgets: {},
+  editorPrefill: null,
 };
 
-type Action = { type: "connected" } | { type: "disconnected" } | { type: "server"; message: ServerMessage };
+type Action =
+  | { type: "connected" }
+  | { type: "disconnected" }
+  | { type: "server"; message: ServerMessage }
+  | { type: "dismiss_notification"; id: string }
+  | { type: "dialog_answered" };
 
 /** Update the in-flight assistant item; append a new one when none exists (upsert). */
 function upsertLastAssistant(items: ChatItem[], update: (item: AssistantItem) => ChatItem): ChatItem[] {
@@ -105,6 +134,10 @@ function applySnapshot(state: AgentState, message: ServerMessage & { sessionId: 
 function reduce(state: AgentState, action: Action): AgentState {
   if (action.type === "connected") return { ...state, connected: true };
   if (action.type === "disconnected") return { ...state, connected: false };
+  if (action.type === "dismiss_notification") {
+    return { ...state, notifications: state.notifications.filter((n) => n.id !== action.id) };
+  }
+  if (action.type === "dialog_answered") return { ...state, dialogQueue: state.dialogQueue.slice(1) };
 
   const message = action.message;
   switch (message.type) {
@@ -188,6 +221,40 @@ function reduce(state: AgentState, action: Action): AgentState {
       };
     case "error":
       return { ...state, errors: [...state.errors, message.message] };
+    case "extension_ui_request":
+      switch (message.method) {
+        case "select":
+        case "confirm":
+        case "input":
+        case "editor":
+          return { ...state, dialogQueue: [...state.dialogQueue, message] };
+        case "notify":
+          return {
+            ...state,
+            notifications: [
+              ...state.notifications,
+              { id: message.id, message: message.message, notifyType: message.notifyType },
+            ],
+          };
+        case "setStatus": {
+          const statuses = { ...state.statuses };
+          if (message.statusText === undefined) delete statuses[message.statusKey];
+          else statuses[message.statusKey] = message.statusText;
+          return { ...state, statuses };
+        }
+        case "setWidget": {
+          const widgets = { ...state.widgets };
+          if (message.widgetLines === undefined) delete widgets[message.widgetKey];
+          else widgets[message.widgetKey] = { lines: message.widgetLines, placement: message.widgetPlacement ?? "aboveEditor" };
+          return { ...state, widgets };
+        }
+        case "setTitle":
+          return { ...state, extensionTitle: message.title };
+        case "set_editor_text":
+          return { ...state, editorPrefill: { text: message.text, nonce: state.editorPrefill ? state.editorPrefill.nonce + 1 : 1 } };
+        default:
+          return state;
+      }
     default:
       return state;
   }
@@ -254,5 +321,11 @@ export function useAgent() {
     deleteSession: (path: string) => sendMessage({ type: "delete_session", path }),
     listSessions: () => sendMessage({ type: "list_sessions" }),
     compact: () => sendMessage({ type: "compact" }),
+    /** Answer the dialog at the head of the queue and pop it locally. */
+    respondToDialog: (response: { id: string; value: string } | { id: string; confirmed: boolean } | { id: string; cancelled: true }) => {
+      sendMessage({ type: "extension_ui_response", ...response });
+      dispatch({ type: "dialog_answered" });
+    },
+    dismissNotification: (id: string) => dispatch({ type: "dismiss_notification", id }),
   };
 }

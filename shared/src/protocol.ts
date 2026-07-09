@@ -82,6 +82,35 @@ export interface ContextUsage {
   percent: number | null;
 }
 
+/**
+ * Extension "Custom UI" bridge (see pi's extensions.md#custom-ui). Mirrors the
+ * shape of pi's own RPC-mode protocol (`RpcExtensionUIRequest`/Response) so the
+ * server can reuse the same request/response semantics over the WebSocket.
+ */
+export type ExtensionUIRequest =
+  | { type: "extension_ui_request"; id: string; method: "select"; title: string; options: string[]; timeout?: number }
+  | { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string; timeout?: number }
+  | { type: "extension_ui_request"; id: string; method: "input"; title: string; placeholder?: string; timeout?: number }
+  | { type: "extension_ui_request"; id: string; method: "editor"; title: string; prefill?: string }
+  | { type: "extension_ui_request"; id: string; method: "notify"; message: string; notifyType?: "info" | "warning" | "error" }
+  | { type: "extension_ui_request"; id: string; method: "setStatus"; statusKey: string; statusText?: string }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "setWidget";
+      widgetKey: string;
+      widgetLines?: string[];
+      widgetPlacement?: "aboveEditor" | "belowEditor";
+    }
+  | { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
+  | { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string };
+
+/** Client's answer to a dialog-style ExtensionUIRequest (select/confirm/input/editor). */
+export type ExtensionUIResponse =
+  | { type: "extension_ui_response"; id: string; value: string }
+  | { type: "extension_ui_response"; id: string; confirmed: boolean }
+  | { type: "extension_ui_response"; id: string; cancelled: true };
+
 /** Snapshot of session state, sent on connect and after session replacement. */
 export interface SessionSnapshot {
   branding: Branding;
@@ -120,7 +149,8 @@ export type ServerMessage =
   | { type: "context_usage"; usage: ContextUsage }
   | { type: "compaction_start" }
   | { type: "compaction_end"; errorMessage?: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | ExtensionUIRequest;
 
 /** Client -> server */
 export type ClientMessage =
@@ -132,4 +162,5 @@ export type ClientMessage =
   | { type: "switch_session"; path: string }
   | { type: "delete_session"; path: string }
   | { type: "list_sessions" }
-  | { type: "compact" };
+  | { type: "compact" }
+  | ExtensionUIResponse;

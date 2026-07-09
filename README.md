@@ -31,6 +31,7 @@ The agent works in the directory the server is started from; override with `PI_C
 - Model + thinking-level selectors
 - Session list / resume / new / delete
 - Slash commands with autocompletion (`/` in the composer: extension commands, prompt templates, skills)
+- Extension "Custom UI" support: dialogs, notifications, status/widgets, editor prefill (see below)
 - Standalone mode: own config dir, file sandbox, branding (see below)
 
 ## Standalone configuration
@@ -64,6 +65,10 @@ iframeWindow.postMessage({ type: "pi-interface:set-theme", theme: "light" }, "ht
 `theme` is `"light"`, `"dark"`, or `"system"`. This works whether or not the toggle is shown. Use the exact origin the UI is served from as the target, not `"*"`.
 
 Relative paths are resolved against the config file's directory.
+
+### Extension Custom UI
+
+Extensions using pi's [Custom UI](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#custom-ui) (`ctx.ui.select/confirm/input/editor/notify/setStatus/setWidget/setTitle/setEditorText`) work in the web UI: dialogs render as a modal, `notify()` as a toast, `setStatus()` as a header badge, `setWidget()` above/below the composer. The bridge binds with `mode: "rpc"`, mirroring pi's own RPC-mode protocol — so `ctx.hasUI` is `true` and dialogs get real answers, but TUI-only features (`custom()`, custom footers/headers/editors, terminal input, themes) have no web equivalent and are no-ops, same as RPC mode.
 
 ## Architecture
 

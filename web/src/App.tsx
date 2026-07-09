@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 import { AssistantMessage } from "./components/AssistantMessage";
 import { Composer } from "./components/Composer";
+import { ExtensionDialog } from "./components/ExtensionDialog";
+import { ExtensionNotifications } from "./components/ExtensionNotifications";
+import { ExtensionWidgets } from "./components/ExtensionWidgets";
 import { Header } from "./components/Header";
 import { ModelBar } from "./components/ModelBar";
 import { ToolCard } from "./components/ToolCard";
@@ -20,6 +23,8 @@ export default function App() {
     deleteSession,
     listSessions,
     compact,
+    respondToDialog,
+    dismissNotification,
   } = useAgent();
   const { theme, toggle: toggleTheme } = useTheme(
     state.branding.defaultTheme ?? "system",
@@ -44,11 +49,12 @@ export default function App() {
   }, [state.items]);
 
   useEffect(() => {
-    document.title = state.branding.title ?? "pi";
+    // An extension's setTitle() (see extensions.md#custom-ui) wins until branding changes again
+    document.title = state.extensionTitle ?? state.branding.title ?? "pi";
     if (state.branding.accentColor) {
       document.documentElement.style.setProperty("--accent", state.branding.accentColor);
     }
-  }, [state.branding]);
+  }, [state.branding, state.extensionTitle]);
 
   return (
     <ThemeContext.Provider value={theme}>
@@ -61,6 +67,7 @@ export default function App() {
           connected={state.connected}
           theme={theme}
           showThemeToggle={state.branding.allowThemeToggle !== false}
+          statuses={state.statuses}
           onToggleTheme={toggleTheme}
           onNewSession={newSession}
           onSwitchSession={switchSession}
@@ -123,13 +130,16 @@ export default function App() {
 
         <footer className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <div className="mx-auto max-w-3xl">
+            <ExtensionWidgets widgets={state.widgets} placement="aboveEditor" />
             <Composer
               isStreaming={state.isStreaming}
               connected={state.connected}
               commands={state.commands}
+              prefill={state.editorPrefill}
               onSend={prompt}
               onAbort={abort}
             />
+            <ExtensionWidgets widgets={state.widgets} placement="belowEditor" />
             <ModelBar
               model={state.model}
               models={state.models}
@@ -145,6 +155,9 @@ export default function App() {
           </div>
         </footer>
       </div>
+
+      {state.dialogQueue[0] && <ExtensionDialog request={state.dialogQueue[0]} onRespond={respondToDialog} />}
+      <ExtensionNotifications notifications={state.notifications} onDismiss={dismissNotification} />
     </ThemeContext.Provider>
   );
 }

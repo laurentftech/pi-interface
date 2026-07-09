@@ -5,6 +5,8 @@ interface ComposerProps {
   isStreaming: boolean;
   connected: boolean;
   commands: CommandInfo[];
+  /** Extension set_editor_text() request (see extensions.md#custom-ui) — bump nonce to reapply the same text. */
+  prefill: { text: string; nonce: number } | null;
   onSend: (text: string) => void;
   onAbort: () => void;
 }
@@ -15,11 +17,16 @@ const SOURCE_BADGE: Record<CommandInfo["source"], string> = {
   skill: "skill",
 };
 
-export function Composer({ isStreaming, connected, commands, onSend, onAbort }: ComposerProps) {
+export function Composer({ isStreaming, connected, commands, prefill, onSend, onAbort }: ComposerProps) {
   const [text, setText] = useState("");
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (prefill) setText(prefill.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill?.nonce]);
 
   // Autocomplete only while typing the command name: "/" + no whitespace yet
   const commandPrefix = useMemo(() => {
