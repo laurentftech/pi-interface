@@ -112,7 +112,7 @@ export default function App() {
                   return (
                     <div
                       key={key}
-                      className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-xl bg-sky-100 px-4 py-2 text-[15px] text-sky-950 dark:bg-sky-950/60 dark:text-zinc-100"
+                      className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-xl bg-blue-100 px-4 py-2 text-[15px] text-blue-950 dark:bg-blue-950/60 dark:text-zinc-100"
                     >
                       {item.text}
                     </div>

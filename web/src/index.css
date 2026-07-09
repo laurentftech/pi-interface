@@ -10,6 +10,15 @@
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 }
 
+/* Default brand accent (deep blue) — App.tsx overrides this inline when
+   branding.accentColor is configured; inline style wins over this rule. */
+:root {
+  --accent: #1d4ed8;
+}
+:root[data-theme="dark"] {
+  --accent: #60a5fa;
+}
+
 html,
 body,
 #root {
@@ -57,7 +66,7 @@ body {
   @apply bg-transparent p-0 text-zinc-800 dark:text-zinc-200;
 }
 .prose-chat a {
-  @apply underline text-sky-600 dark:text-sky-400;
+  @apply underline text-blue-700 dark:text-blue-400;
 }
 .prose-chat blockquote {
   @apply border-l-2 pl-3 my-2 border-zinc-300 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400;
