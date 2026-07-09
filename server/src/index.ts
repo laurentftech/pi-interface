@@ -65,6 +65,8 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
       ...(config.extensionPaths.length > 0
         ? { additionalExtensionPaths: config.extensionPaths }
         : {}),
+      ...(config.systemPrompt !== undefined ? { systemPrompt: config.systemPrompt } : {}),
+      ...(config.appendSystemPrompt.length > 0 ? { appendSystemPrompt: config.appendSystemPrompt } : {}),
     },
   });
   return {

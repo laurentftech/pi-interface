@@ -60,6 +60,10 @@ export interface AppConfig {
   noExtensions: boolean;
   /** Explicit extension paths to load (in addition to defaults). */
   extensionPaths: string[];
+  /** Replace pi's built-in system prompt entirely (tool guidelines are lost — write your own). */
+  systemPrompt?: string;
+  /** Extra text appended after the (built-in or custom) system prompt, one entry per paragraph. */
+  appendSystemPrompt: string[];
   port: number;
   host: string;
   /** Extra exact Origins allowed on the WebSocket (for embedding in another app). */
@@ -106,6 +110,7 @@ export function loadConfig(baseCwd: string): AppConfig {
     cwd: baseCwd,
     noExtensions: false,
     extensionPaths: [],
+    appendSystemPrompt: [],
     port: Number(process.env.PORT ?? 3141),
     host: "127.0.0.1",
     allowedOrigins: [],
@@ -164,6 +169,20 @@ export function loadConfig(baseCwd: string): AppConfig {
   config.tools = optionalStringArray(raw, "tools");
   config.noExtensions = optionalBoolean(raw, "noExtensions", false);
   config.extensionPaths = (optionalStringArray(raw, "extensionPaths") ?? []).map(resolve);
+
+  const systemPrompt = optionalString(raw, "systemPrompt");
+  const systemPromptFile = optionalString(raw, "systemPromptFile");
+  if (systemPrompt !== undefined && systemPromptFile !== undefined) {
+    fail(`"systemPrompt" and "systemPromptFile" are mutually exclusive`);
+  }
+  if (systemPromptFile !== undefined) {
+    const resolvedFile = resolve(systemPromptFile);
+    if (!fs.existsSync(resolvedFile)) fail(`systemPromptFile does not exist: ${resolvedFile}`);
+    config.systemPrompt = fs.readFileSync(resolvedFile, "utf8");
+  } else if (systemPrompt !== undefined) {
+    config.systemPrompt = systemPrompt;
+  }
+  config.appendSystemPrompt = optionalStringArray(raw, "appendSystemPrompt") ?? [];
 
   if (raw.server !== undefined) {
     const server = asObject(raw.server, "server");

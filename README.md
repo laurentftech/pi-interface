@@ -55,6 +55,8 @@ Optional. Create `pi-interface.config.json` next to where you launch the server 
 | `sandbox.allowBash` | Adds bash — **not path-confined**, explicit opt-in (default `false`) |
 | `tools` | Tool allowlist in non-sandbox mode, e.g. `["read","grep","find","ls"]` |
 | `noExtensions` / `extensionPaths` | Disable extension discovery / load only listed extensions |
+| `systemPrompt` / `systemPromptFile` | Replace pi's built-in system prompt entirely (mutually exclusive; `systemPromptFile` is a path to a text file). Project context files, skills, and `appendSystemPrompt` are still layered on top |
+| `appendSystemPrompt` | Array of extra paragraphs appended after the (built-in or custom) system prompt |
 | `server.port` | Port to listen on (default `3141`, or the `PORT` env var if set) |
 | `server.host` | Host to bind to (default `127.0.0.1` — only change this if you understand the security note above) |
 | `server.allowedOrigins` | Extra exact Origins accepted on the WebSocket (embed the UI as a tab in another app) |
