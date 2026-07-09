@@ -2,6 +2,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatItem } from "@pi-interface/shared";
+import { CopyButton } from "./CopyButton";
 import { Mermaid } from "./Mermaid";
 
 type AssistantItem = Extract<ChatItem, { kind: "assistant" }>;
@@ -9,7 +10,7 @@ type AssistantItem = Extract<ChatItem, { kind: "assistant" }>;
 function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="my-1 rounded-lg border border-zinc-800/80 bg-zinc-900/40 text-sm">
+    <div className="my-1 rounded-lg border border-zinc-200 bg-zinc-50 text-sm dark:border-zinc-800/80 dark:bg-zinc-900/40">
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -19,7 +20,7 @@ function ThinkingBlock({ text }: { text: string }) {
         <span className="ml-auto">{open ? "▾" : "▸"}</span>
       </button>
       {open && (
-        <div className="whitespace-pre-wrap border-t border-zinc-800/80 px-3 py-2 text-xs italic text-zinc-500">
+        <div className="whitespace-pre-wrap border-t border-zinc-200 px-3 py-2 text-xs italic text-zinc-500 dark:border-zinc-800/80">
           {text}
         </div>
       )}
@@ -49,8 +50,19 @@ function PreBlock(props: React.HTMLAttributes<HTMLPreElement>) {
 }
 
 export function AssistantMessage({ item }: { item: AssistantItem }) {
+  const fullText = item.blocks
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("\n\n")
+    .trim();
+
   return (
-    <div className="max-w-none">
+    <div className="group max-w-none">
+      {fullText && !item.streaming && (
+        <div className="flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
+          <CopyButton text={fullText} />
+        </div>
+      )}
       {item.blocks.map((block, i) =>
         block.type === "thinking" ? (
           <ThinkingBlock key={block.contentIndex ?? i} text={block.text} />
@@ -63,7 +75,7 @@ export function AssistantMessage({ item }: { item: AssistantItem }) {
         ),
       )}
       {item.errorMessage && (
-        <div className="mt-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-300">
+        <div className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
           {item.errorMessage}
         </div>
       )}

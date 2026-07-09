@@ -1,9 +1,12 @@
-import { useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import type {
   Branding,
   ChatItem,
   ClientMessage,
   CommandInfo,
+  ContextUsage,
+  DirEntry,
+  ExtensionUIRequest,
   ModelChoice,
   ServerMessage,
   SessionSummary,
@@ -12,6 +15,25 @@ import type {
 
 type AssistantItem = Extract<ChatItem, { kind: "assistant" }>;
 type ToolItem = Extract<ChatItem, { kind: "tool" }>;
+
+/** Extension "Custom UI" dialog requests — need a client answer (select/confirm/input/editor). */
+export type DialogRequest = Extract<ExtensionUIRequest, { method: "select" | "confirm" | "input" | "editor" }>;
+export interface ExtensionNotification {
+  id: string;
+  message: string;
+  notifyType?: "info" | "warning" | "error";
+}
+export interface ExtensionWidget {
+  lines: string[];
+  placement: "aboveEditor" | "belowEditor";
+}
+
+/** File-browser sidebar: one entry per directory path ("" = root), keyed flat (not nested). */
+export type DirState = DirEntry[] | "loading" | { error: string };
+export type OpenFile =
+  | { status: "loading"; path: string; requestId: string }
+  | { status: "loaded"; path: string; content: string; size: number }
+  | { status: "error"; path: string; message: string };
 
 export interface AgentState {
   connected: boolean;
@@ -27,6 +49,16 @@ export interface AgentState {
   items: ChatItem[];
   queue: { steering: string[]; followUp: string[] };
   errors: string[];
+  contextUsage: ContextUsage | null;
+  isCompacting: boolean;
+  dialogQueue: DialogRequest[];
+  notifications: ExtensionNotification[];
+  statuses: Record<string, string>;
+  widgets: Record<string, ExtensionWidget>;
+  extensionTitle?: string;
+  editorPrefill: { text: string; nonce: number } | null;
+  fileTree: Record<string, DirState>;
+  openFile: OpenFile | null;
 }
 
 const initialState: AgentState = {
@@ -43,9 +75,26 @@ const initialState: AgentState = {
   items: [],
   queue: { steering: [], followUp: [] },
   errors: [],
+  contextUsage: null,
+  isCompacting: false,
+  dialogQueue: [],
+  notifications: [],
+  statuses: {},
+  widgets: {},
+  editorPrefill: null,
+  fileTree: {},
+  openFile: null,
 };
 
-type Action = { type: "connected" } | { type: "disconnected" } | { type: "server"; message: ServerMessage };
+type Action =
+  | { type: "connected" }
+  | { type: "disconnected" }
+  | { type: "server"; message: ServerMessage }
+  | { type: "dismiss_notification"; id: string }
+  | { type: "dialog_answered" }
+  | { type: "dir_list_started"; path: string }
+  | { type: "file_read_started"; path: string; requestId: string }
+  | { type: "close_file_preview" };
 
 /** Update the in-flight assistant item; append a new one when none exists (upsert). */
 function upsertLastAssistant(items: ChatItem[], update: (item: AssistantItem) => ChatItem): ChatItem[] {
@@ -92,12 +141,33 @@ function applySnapshot(state: AgentState, message: ServerMessage & { sessionId: 
     items: message.items,
     queue: { steering: [], followUp: [] },
     errors: [],
+    contextUsage: message.contextUsage ?? null,
+    isCompacting: false,
+    // The old session's extensions (and any dialogs/toasts/status/widgets they
+    // set) are gone once the session is replaced — nothing survives a switch.
+    dialogQueue: [],
+    notifications: [],
+    statuses: {},
+    widgets: {},
+    extensionTitle: undefined,
+    editorPrefill: null,
   };
 }
 
 function reduce(state: AgentState, action: Action): AgentState {
   if (action.type === "connected") return { ...state, connected: true };
   if (action.type === "disconnected") return { ...state, connected: false };
+  if (action.type === "dismiss_notification") {
+    return { ...state, notifications: state.notifications.filter((n) => n.id !== action.id) };
+  }
+  if (action.type === "dialog_answered") return { ...state, dialogQueue: state.dialogQueue.slice(1) };
+  if (action.type === "dir_list_started") {
+    return { ...state, fileTree: { ...state.fileTree, [action.path]: "loading" } };
+  }
+  if (action.type === "file_read_started") {
+    return { ...state, openFile: { status: "loading", path: action.path, requestId: action.requestId } };
+  }
+  if (action.type === "close_file_preview") return { ...state, openFile: null };
 
   const message = action.message;
   switch (message.type) {
@@ -144,6 +214,8 @@ function reduce(state: AgentState, action: Action): AgentState {
       };
     case "assistant_end":
       return { ...state, items: upsertLastAssistant(state.items, () => message.item) };
+    case "custom_message":
+      return { ...state, items: [...state.items, message.item] };
     case "tool_start":
       return {
         ...state,
@@ -169,8 +241,64 @@ function reduce(state: AgentState, action: Action): AgentState {
       };
     case "queue":
       return { ...state, queue: { steering: message.steering, followUp: message.followUp } };
+    case "context_usage":
+      return { ...state, contextUsage: message.usage };
+    case "compaction_start":
+      return { ...state, isCompacting: true };
+    case "compaction_end":
+      return {
+        ...state,
+        isCompacting: false,
+        errors: message.errorMessage ? [...state.errors, message.errorMessage] : state.errors,
+      };
     case "error":
       return { ...state, errors: [...state.errors, message.message] };
+    case "directory_listing":
+      return { ...state, fileTree: { ...state.fileTree, [message.path]: message.entries } };
+    case "file_content":
+      // Ignore stale responses from a since-superseded read (user opened another file meanwhile)
+      if (state.openFile?.status !== "loading" || state.openFile.requestId !== message.requestId) return state;
+      return { ...state, openFile: { status: "loaded", path: message.path, content: message.content, size: message.size } };
+    case "file_browser_error":
+      if (message.requestId.startsWith("dir:")) {
+        return { ...state, fileTree: { ...state.fileTree, [message.path]: { error: message.message } } };
+      }
+      if (state.openFile?.status !== "loading" || state.openFile.requestId !== message.requestId) return state;
+      return { ...state, openFile: { status: "error", path: message.path, message: message.message } };
+    case "extension_ui_request":
+      switch (message.method) {
+        case "select":
+        case "confirm":
+        case "input":
+        case "editor":
+          return { ...state, dialogQueue: [...state.dialogQueue, message] };
+        case "notify":
+          return {
+            ...state,
+            notifications: [
+              ...state.notifications,
+              { id: message.id, message: message.message, notifyType: message.notifyType },
+            ],
+          };
+        case "setStatus": {
+          const statuses = { ...state.statuses };
+          if (message.statusText === undefined) delete statuses[message.statusKey];
+          else statuses[message.statusKey] = message.statusText;
+          return { ...state, statuses };
+        }
+        case "setWidget": {
+          const widgets = { ...state.widgets };
+          if (message.widgetLines === undefined) delete widgets[message.widgetKey];
+          else widgets[message.widgetKey] = { lines: message.widgetLines, placement: message.widgetPlacement ?? "aboveEditor" };
+          return { ...state, widgets };
+        }
+        case "setTitle":
+          return { ...state, extensionTitle: message.title };
+        case "set_editor_text":
+          return { ...state, editorPrefill: { text: message.text, nonce: state.editorPrefill ? state.editorPrefill.nonce + 1 : 1 } };
+        default:
+          return state;
+      }
     default:
       return state;
   }
@@ -179,6 +307,23 @@ function reduce(state: AgentState, action: Action): AgentState {
 export function useAgent() {
   const [state, dispatch] = useReducer(reduce, initialState);
   const socketRef = useRef<WebSocket | null>(null);
+  // Mirrors of state read from inside the stable onmessage closure below (which
+  // must not be recreated per-render, so it can't close over fresh `state`).
+  const fileTreeRef = useRef(state.fileTree);
+  const openFileRef = useRef(state.openFile);
+  useEffect(() => {
+    fileTreeRef.current = state.fileTree;
+  }, [state.fileTree]);
+  useEffect(() => {
+    openFileRef.current = state.openFile;
+  }, [state.openFile]);
+
+  const sendMessage = useCallback((message: ClientMessage) => {
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(message));
+    }
+  }, []);
 
   useEffect(() => {
     let retryTimer: number | undefined;
@@ -195,11 +340,28 @@ export function useAgent() {
       };
       socket.onmessage = (event) => {
         if (socketRef.current !== socket) return;
+        let message: ServerMessage;
         try {
-          dispatch({ type: "server", message: JSON.parse(event.data as string) as ServerMessage });
+          message = JSON.parse(event.data as string) as ServerMessage;
         } catch {
-          // ignore malformed frames
+          return; // ignore malformed frames
         }
+        if (message.type === "file_changed") {
+          const lastSlash = message.path.lastIndexOf("/");
+          const parentPath = lastSlash < 0 ? "" : message.path.slice(0, lastSlash);
+          if (fileTreeRef.current[parentPath] !== undefined) {
+            dispatch({ type: "dir_list_started", path: parentPath });
+            sendMessage({ type: "list_directory", path: parentPath, requestId: `dir:${crypto.randomUUID()}` });
+          }
+          const openFile = openFileRef.current;
+          if (openFile?.status === "loaded" && openFile.path === message.path) {
+            const requestId = `file:${crypto.randomUUID()}`;
+            dispatch({ type: "file_read_started", path: message.path, requestId });
+            sendMessage({ type: "read_file", path: message.path, requestId });
+          }
+          return;
+        }
+        dispatch({ type: "server", message });
       };
       socket.onclose = () => {
         // Superseded sockets must not flip the indicator (StrictMode remount, reconnect races)
@@ -217,14 +379,7 @@ export function useAgent() {
       socketRef.current = null;
       socket?.close();
     };
-  }, []);
-
-  function sendMessage(message: ClientMessage) {
-    const socket = socketRef.current;
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(message));
-    }
-  }
+  }, [sendMessage]);
 
   return {
     state,
@@ -236,5 +391,24 @@ export function useAgent() {
     switchSession: (path: string) => sendMessage({ type: "switch_session", path }),
     deleteSession: (path: string) => sendMessage({ type: "delete_session", path }),
     listSessions: () => sendMessage({ type: "list_sessions" }),
+    compact: () => sendMessage({ type: "compact" }),
+    /** Answer the dialog at the head of the queue and pop it locally. */
+    respondToDialog: (response: { id: string; value: string } | { id: string; confirmed: boolean } | { id: string; cancelled: true }) => {
+      sendMessage({ type: "extension_ui_response", ...response });
+      dispatch({ type: "dialog_answered" });
+    },
+    dismissNotification: (id: string) => dispatch({ type: "dismiss_notification", id }),
+    /** List a directory's children (path is relative to the browser root; "" = root). */
+    listDirectory: (path: string) => {
+      dispatch({ type: "dir_list_started", path });
+      sendMessage({ type: "list_directory", path, requestId: `dir:${crypto.randomUUID()}` });
+    },
+    /** Open a file's read-only preview. */
+    readFile: (path: string) => {
+      const requestId = `file:${crypto.randomUUID()}`;
+      dispatch({ type: "file_read_started", path, requestId });
+      sendMessage({ type: "read_file", path, requestId });
+    },
+    closeFilePreview: () => dispatch({ type: "close_file_preview" }),
   };
 }

@@ -6,6 +6,7 @@
  * malicious webpages in the user's own browser — WS is exempt from CORS).
  * The agent has bash/edit/write tools: never weaken either check.
  */
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
@@ -21,6 +22,9 @@ import {
 import {
   type ClientMessage,
   type CommandInfo,
+  type ContextUsage,
+  type ExtensionUIRequest,
+  type ExtensionUIResponse,
   type ModelChoice,
   type ServerMessage,
   type SessionSnapshot,
@@ -28,8 +32,9 @@ import {
 } from "@pi-interface/shared";
 import path from "node:path";
 import { loadConfig } from "./config.ts";
-import { assistantToItem, contentText, historyToItems, truncate } from "./convert.ts";
-import { createSandboxedTools } from "./sandbox.ts";
+import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
+import { FileBrowserError, listDirectory, readFileForPreview, resolveBrowserRoot } from "./fileBrowser.ts";
+import { createSandboxedTools, isWithin, realResolve } from "./sandbox.ts";
 
 // npm workspace scripts run with cwd=server/ — INIT_CWD is where `npm run` was invoked
 const BASE_CWD = process.env.PI_CWD ?? process.env.INIT_CWD ?? process.cwd();
@@ -44,6 +49,7 @@ const SESSION_DIR = config.agentDir ? path.join(config.agentDir, "sessions") : u
 // --- Agent session runtime ---------------------------------------------------
 
 const sandboxedTools = config.sandbox ? await createSandboxedTools(config.sandbox) : undefined;
+const BROWSER_ROOT = await resolveBrowserRoot(config);
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd,
@@ -85,6 +91,10 @@ if (runtime.modelFallbackMessage) console.warn(`[pi] ${runtime.modelFallbackMess
 function modelName(): string {
   const model = runtime.session.model as { provider?: string; id?: string } | undefined;
   return model ? `${model.provider}/${model.id}` : "unknown";
+}
+
+function contextUsage(): ContextUsage | undefined {
+  return runtime.session.getContextUsage();
 }
 
 function availableModels(): ModelChoice[] {
@@ -147,6 +157,7 @@ function snapshot(): SessionSnapshot {
     items: historyToItems(session.messages as never, session.isStreaming),
     models: availableModels(),
     commands: availableCommands(),
+    contextUsage: contextUsage(),
   };
 }
 
@@ -165,6 +176,239 @@ function send(socket: WebSocket, message: ServerMessage): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
 }
 
+// --- Extension "Custom UI" bridge -----------------------------------------------
+// See https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md#custom-ui
+// Mirrors pi's own RPC-mode ExtensionUIContext (dialogs forwarded as JSON, client
+// answers by id) but over the WebSocket instead of stdin/stdout, and broadcasts
+// to every connected tab — whichever client answers first resolves the request.
+
+type PendingExtensionRequest = { resolve: (response: ExtensionUIResponse) => void };
+const pendingExtensionRequests = new Map<string, PendingExtensionRequest>();
+
+/** Dialog helper: sends a request, resolves on the matching response, timeout, or abort. */
+function createDialogPromise<T>(
+  opts: { signal?: AbortSignal; timeout?: number } | undefined,
+  defaultValue: T,
+  request: Extract<ExtensionUIRequest, { method: "select" | "confirm" | "input" }>,
+  parseResponse: (response: ExtensionUIResponse) => T,
+): Promise<T> {
+  if (opts?.signal?.aborted) return Promise.resolve(defaultValue);
+  const id = request.id;
+  return new Promise((resolve) => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      opts?.signal?.removeEventListener("abort", onAbort);
+      pendingExtensionRequests.delete(id);
+    };
+    const onAbort = () => {
+      cleanup();
+      resolve(defaultValue);
+    };
+    opts?.signal?.addEventListener("abort", onAbort, { once: true });
+    if (opts?.timeout) {
+      timeoutId = setTimeout(() => {
+        cleanup();
+        resolve(defaultValue);
+      }, opts.timeout);
+    }
+    pendingExtensionRequests.set(id, {
+      resolve: (response) => {
+        cleanup();
+        resolve(parseResponse(response));
+      },
+    });
+    broadcast(request);
+  });
+}
+
+/**
+ * Build the ExtensionUIContext bound to the current AgentSession. TUI-only
+ * concerns (custom components, footers/headers, editor replacement, terminal
+ * input, themes) have no web equivalent and are no-ops, same as pi's own RPC
+ * mode — extensions relying on those still work in the pi CLI, just not here.
+ */
+function createExtensionUIContext() {
+  return {
+    select(title: string, options: string[], opts?: { signal?: AbortSignal; timeout?: number }) {
+      const id = randomUUID();
+      return createDialogPromise(opts, undefined, { type: "extension_ui_request", id, method: "select", title, options, timeout: opts?.timeout }, (r) =>
+        "cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined,
+      );
+    },
+    confirm(title: string, message: string, opts?: { signal?: AbortSignal; timeout?: number }) {
+      const id = randomUUID();
+      return createDialogPromise(opts, false, { type: "extension_ui_request", id, method: "confirm", title, message, timeout: opts?.timeout }, (r) =>
+        "cancelled" in r && r.cancelled ? false : "confirmed" in r ? r.confirmed : false,
+      );
+    },
+    input(title: string, placeholder?: string, opts?: { signal?: AbortSignal; timeout?: number }) {
+      const id = randomUUID();
+      return createDialogPromise(
+        opts,
+        undefined,
+        { type: "extension_ui_request", id, method: "input", title, placeholder, timeout: opts?.timeout },
+        (r) => ("cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined),
+      );
+    },
+    notify(message: string, notifyType?: "info" | "warning" | "error") {
+      broadcast({ type: "extension_ui_request", id: randomUUID(), method: "notify", message, notifyType });
+    },
+    onTerminalInput() {
+      // Raw terminal input has no web equivalent
+      return () => {};
+    },
+    setStatus(statusKey: string, statusText: string | undefined) {
+      broadcast({ type: "extension_ui_request", id: randomUUID(), method: "setStatus", statusKey, statusText });
+    },
+    setWorkingMessage() {},
+    setWorkingVisible() {},
+    setWorkingIndicator() {},
+    setHiddenThinkingLabel() {},
+    setWidget(
+      widgetKey: string,
+      content: string[] | undefined | ((...args: never[]) => unknown),
+      options?: { placement?: "aboveEditor" | "belowEditor" },
+    ) {
+      // Component factories need a TUI to render into — only string arrays are supported here
+      if (content === undefined || Array.isArray(content)) {
+        broadcast({
+          type: "extension_ui_request",
+          id: randomUUID(),
+          method: "setWidget",
+          widgetKey,
+          widgetLines: content,
+          widgetPlacement: options?.placement,
+        });
+      }
+    },
+    setFooter() {},
+    setHeader() {},
+    setTitle(title: string) {
+      broadcast({ type: "extension_ui_request", id: randomUUID(), method: "setTitle", title });
+    },
+    async custom() {
+      // Custom TUI components can't run in the browser
+      return undefined;
+    },
+    pasteToEditor(text: string) {
+      this.setEditorText(text);
+    },
+    setEditorText(text: string) {
+      broadcast({ type: "extension_ui_request", id: randomUUID(), method: "set_editor_text", text });
+    },
+    getEditorText() {
+      // Synchronous — can't wait on the client's current composer text
+      return "";
+    },
+    editor(title: string, prefill?: string): Promise<string | undefined> {
+      const id = randomUUID();
+      return new Promise((resolve) => {
+        pendingExtensionRequests.set(id, {
+          resolve: (response) => {
+            if ("cancelled" in response && response.cancelled) resolve(undefined);
+            else if ("value" in response) resolve(response.value);
+            else resolve(undefined);
+          },
+        });
+        broadcast({ type: "extension_ui_request", id, method: "editor", title, prefill });
+      });
+    },
+    addAutocompleteProvider() {},
+    setEditorComponent() {},
+    getEditorComponent() {
+      return undefined;
+    },
+    // Terminal ANSI theming has no web equivalent. Identity-returning stub (no
+    // colors) rather than throwing, in case an extension reads it defensively.
+    get theme() {
+      const identity = (_color: unknown, text: string) => text;
+      return {
+        fg: identity,
+        bg: identity,
+        bold: (text: string) => text,
+        italic: (text: string) => text,
+        underline: (text: string) => text,
+        inverse: (text: string) => text,
+        strikethrough: (text: string) => text,
+        getFgAnsi: () => "",
+        getBgAnsi: () => "",
+        getColorMode: () => "truecolor" as const,
+        getThinkingBorderColor: () => (text: string) => text,
+        getBashModeBorderColor: () => (text: string) => text,
+      };
+    },
+    getAllThemes() {
+      return [];
+    },
+    getTheme() {
+      return undefined;
+    },
+    setTheme() {
+      return { success: false, error: "Theme switching not supported in pi-interface" };
+    },
+    getToolsExpanded() {
+      return false;
+    },
+    setToolsExpanded() {},
+  };
+}
+
+/** Resolve a pending dialog/editor request the client just answered. */
+function handleExtensionUIResponse(response: ExtensionUIResponse): void {
+  const pending = pendingExtensionRequests.get(response.id);
+  if (!pending) return;
+  pendingExtensionRequests.delete(response.id);
+  pending.resolve(response);
+}
+
+/** Unblock any extension still awaiting a dialog/editor answer from a session about to be replaced. */
+function cancelPendingExtensionRequests(): void {
+  for (const pending of pendingExtensionRequests.values()) {
+    pending.resolve({ type: "extension_ui_response", id: "", cancelled: true });
+  }
+  pendingExtensionRequests.clear();
+}
+
+/** (Re)bind the extension runtime — UI bridge, mode, error reporting — to the current session. */
+async function bindExtensionsForSession(): Promise<void> {
+  await runtime.session.bindExtensions({
+    // Cast: structurally satisfies ExtensionUIContext (verified against the SDK's
+    // own RPC-mode implementation); see the `theme` getter above for the one gap.
+    uiContext: createExtensionUIContext() as any,
+    mode: "rpc",
+    // Extensions can call ctx.abort() themselves; no override needed here.
+    // commandContextActions (fork/tree navigation) isn't wired up — out of scope for the UI bridge.
+    shutdownHandler: () => {
+      // Unlike pi's one-shot RPC subprocess, this server is long-lived and shared
+      // across tabs/sessions — an extension asking to "shut down" shouldn't kill it.
+      console.warn("[pi] extension requested shutdown — ignored (pi-interface is a persistent server)");
+    },
+    onError: (err) => {
+      reportError(new Error(`[extension ${err.extensionPath}] ${err.error}`));
+    },
+  });
+}
+
+/**
+ * Best-effort file-browser invalidation: if an edit/write tool touched a path inside
+ * BROWSER_ROOT, tell clients so an expanded directory or open preview can refresh.
+ * Not a security boundary — resolution failures or out-of-root paths are just skipped.
+ */
+async function announceFileChange(toolName: string, args: unknown): Promise<void> {
+  if (toolName !== "edit" && toolName !== "write") return;
+  const targetPath = (args as { path?: unknown } | null)?.path;
+  if (typeof targetPath !== "string") return;
+  try {
+    const resolved = await realResolve(path.resolve(BROWSER_ROOT, targetPath));
+    if (!isWithin(BROWSER_ROOT, resolved)) return;
+    const relPath = path.relative(BROWSER_ROOT, resolved).split(path.sep).join("/");
+    broadcast({ type: "file_changed", path: relPath });
+  } catch {
+    // Resolution failure (e.g. race with the tool call) — nothing to invalidate
+  }
+}
+
 // --- SDK events -> wire events -------------------------------------------------
 
 /** Event subscriptions attach to one AgentSession — rebind after replacement. */
@@ -174,9 +418,12 @@ function bindSession(): () => void {
       case "agent_start":
         broadcast({ type: "agent_start" });
         break;
-      case "agent_end":
+      case "agent_end": {
         broadcast({ type: "agent_end" });
+        const usage = contextUsage();
+        if (usage) broadcast({ type: "context_usage", usage });
         break;
+      }
       case "message_start":
         if (event.message.role === "assistant") {
           broadcast({ type: "assistant_start" });
@@ -195,6 +442,8 @@ function bindSession(): () => void {
         if (event.message.role === "assistant") {
           // Full sync of the finished message (covers retries/partial rebuilds)
           broadcast({ type: "assistant_end", item: assistantToItem(event.message as never) });
+        } else if (event.message.role === "custom" && (event.message as { display?: boolean }).display) {
+          broadcast({ type: "custom_message", item: customMessageToItem(event.message as never) });
         }
         break;
       case "tool_execution_start":
@@ -204,6 +453,7 @@ function bindSession(): () => void {
           toolName: event.toolName,
           args: event.args,
         });
+        void announceFileChange(event.toolName, event.args);
         break;
       case "tool_execution_update": {
         const text = contentText(event.partialResult?.content);
@@ -226,6 +476,15 @@ function bindSession(): () => void {
       case "thinking_level_changed":
         broadcast({ type: "thinking_changed", level: event.level });
         break;
+      case "compaction_start":
+        broadcast({ type: "compaction_start" });
+        break;
+      case "compaction_end": {
+        broadcast({ type: "compaction_end", ...(event.errorMessage ? { errorMessage: event.errorMessage } : {}) });
+        const usage = contextUsage();
+        if (usage) broadcast({ type: "context_usage", usage });
+        break;
+      }
       default:
         break;
     }
@@ -233,11 +492,14 @@ function bindSession(): () => void {
 }
 
 let unsubscribe = bindSession();
+await bindExtensionsForSession();
 
 /** After runtime.newSession()/switchSession(), runtime.session is a new object. */
-function rebindAndAnnounce(): void {
+async function rebindAndAnnounce(): Promise<void> {
+  cancelPendingExtensionRequests();
   unsubscribe();
   unsubscribe = bindSession();
+  await bindExtensionsForSession();
   broadcast({ type: "session_replaced", ...snapshot() });
   console.log(`[pi] session ${runtime.session.sessionId}`);
 }
@@ -258,13 +520,13 @@ async function replaceSession(socket: WebSocket, action: () => Promise<{ cancell
   replacingSession = true;
   try {
     const { cancelled } = await action();
-    if (!cancelled) rebindAndAnnounce();
+    if (!cancelled) await rebindAndAnnounce();
   } catch (error) {
     reportError(error);
     // The old session may be disposed — land on a fresh one instead
     try {
       const { cancelled } = await runtime.newSession();
-      if (!cancelled) rebindAndAnnounce();
+      if (!cancelled) await rebindAndAnnounce();
     } catch (recoveryError) {
       reportError(recoveryError);
     }
@@ -339,6 +601,28 @@ function reportError(error: unknown): void {
   broadcast({ type: "error", message: error instanceof Error ? error.message : String(error) });
 }
 
+/** File-browser sidebar: list a directory, confined to BROWSER_ROOT. */
+async function handleListDirectory(socket: WebSocket, dirPath: string, requestId: string): Promise<void> {
+  try {
+    const entries = await listDirectory(BROWSER_ROOT, dirPath);
+    send(socket, { type: "directory_listing", requestId, path: dirPath, entries });
+  } catch (error) {
+    const message = error instanceof FileBrowserError ? error.message : `Unexpected error: ${(error as Error).message}`;
+    send(socket, { type: "file_browser_error", requestId, path: dirPath, message });
+  }
+}
+
+/** File-browser sidebar: read a file for preview, confined to BROWSER_ROOT. */
+async function handleReadFile(socket: WebSocket, filePath: string, requestId: string): Promise<void> {
+  try {
+    const { content, size } = await readFileForPreview(BROWSER_ROOT, filePath);
+    send(socket, { type: "file_content", requestId, path: filePath, content, size });
+  } catch (error) {
+    const message = error instanceof FileBrowserError ? error.message : `Unexpected error: ${(error as Error).message}`;
+    send(socket, { type: "file_browser_error", requestId, path: filePath, message });
+  }
+}
+
 function handleClientMessage(socket: WebSocket, raw: string): void {
   let message: ClientMessage;
   try {
@@ -395,6 +679,21 @@ function handleClientMessage(socket: WebSocket, raw: string): void {
     case "list_sessions":
       listSessions(socket).catch(reportError);
       break;
+    case "compact":
+      // Failures surface via the compaction_end event (errorMessage) — avoid double-reporting.
+      runtime.session.compact().catch(() => {});
+      break;
+    case "extension_ui_response":
+      handleExtensionUIResponse(message);
+      break;
+    case "list_directory":
+      if (typeof message.path !== "string" || typeof message.requestId !== "string") return;
+      handleListDirectory(socket, message.path, message.requestId).catch(reportError);
+      break;
+    case "read_file":
+      if (typeof message.path !== "string" || typeof message.requestId !== "string") return;
+      handleReadFile(socket, message.path, message.requestId).catch(reportError);
+      break;
   }
 }
 
@@ -442,6 +741,7 @@ if (config.sandbox) {
   ].join(", ");
   console.log(`[pi] sandbox ${config.sandbox.root} · ${extras}`);
 }
+console.log(`[pi] file browser root ${BROWSER_ROOT}`);
 console.log(`[server] ws://${HOST}:${PORT}/ws`);
 
 // --- Shutdown -------------------------------------------------------------------------
