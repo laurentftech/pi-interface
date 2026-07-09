@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { Theme } from "@pi-interface/shared";
 import { AssistantMessage } from "./components/AssistantMessage";
 import { Composer } from "./components/Composer";
 import { CustomMessageCard } from "./components/CustomMessageCard";
@@ -13,7 +14,27 @@ import { ThemeContext } from "./ThemeContext";
 import { useAgent } from "./useAgent";
 import { useTheme } from "./useTheme";
 
-export default function App() {
+export interface AppHandle {
+  setTheme(theme: Theme): void;
+}
+
+interface AppProps {
+  /** pi-interface backend origin (e.g. "https://api.example.com"); "" (default) = same origin as this page. */
+  serverUrl?: string;
+  /**
+   * Element `data-theme`/`--accent` are applied to. Defaults to
+   * `document.documentElement` (the standalone app). Passing one also skips the
+   * `document.title` mutation below — both would otherwise leak onto the host
+   * page when mounted inside a Shadow DOM (see `embed/src/mount.tsx`).
+   */
+  rootElement?: HTMLElement;
+  /** Overrides branding.defaultTheme (avoids a flash of the wrong theme before branding loads). */
+  initialTheme?: Theme;
+}
+
+const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootElement, initialTheme }, ref) {
+  const embedded = rootElement !== undefined;
+  const accentTarget = rootElement ?? document.documentElement;
   const {
     state,
     prompt,
@@ -30,12 +51,16 @@ export default function App() {
     listDirectory,
     readFile,
     closeFilePreview,
-  } = useAgent();
+    searchFiles,
+    clearFileSearch,
+  } = useAgent(serverUrl);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { theme, toggle: toggleTheme } = useTheme(
-    state.branding.defaultTheme ?? "system",
+  const { theme, toggle: toggleTheme, setTheme } = useTheme(
+    initialTheme ?? state.branding.defaultTheme ?? "system",
     state.branding.allowThemeToggle !== false,
+    accentTarget,
   );
+  useImperativeHandle(ref, () => ({ setTheme }), [setTheme]);
   const mainRef = useRef<HTMLElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -55,12 +80,13 @@ export default function App() {
   }, [state.items]);
 
   useEffect(() => {
-    // An extension's setTitle() (see extensions.md#custom-ui) wins until branding changes again
-    document.title = state.extensionTitle ?? state.branding.title ?? "pi";
+    // An extension's setTitle() (see extensions.md#custom-ui) wins until branding changes again.
+    // Skipped when embedded: the host page owns its own <title>.
+    if (!embedded) document.title = state.extensionTitle ?? state.branding.title ?? "pi";
     if (state.branding.accentColor) {
-      document.documentElement.style.setProperty("--accent", state.branding.accentColor);
+      accentTarget.style.setProperty("--accent", state.branding.accentColor);
     }
-  }, [state.branding, state.extensionTitle]);
+  }, [state.branding, state.extensionTitle, embedded, accentTarget]);
 
   return (
     <ThemeContext.Provider value={theme}>
@@ -69,6 +95,7 @@ export default function App() {
           <Sidebar
             tree={state.fileTree}
             openFile={state.openFile}
+            writableRoot={state.writableRoot}
             onExpand={listDirectory}
             onSelectFile={readFile}
             onClosePreview={closeFilePreview}
@@ -109,7 +136,7 @@ export default function App() {
                   return (
                     <div
                       key={key}
-                      className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-xl bg-sky-100 px-4 py-2 text-[15px] text-sky-950 dark:bg-sky-950/60 dark:text-zinc-100"
+                      className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-xl bg-blue-100 px-4 py-2 text-[15px] text-blue-950 dark:bg-blue-950/60 dark:text-zinc-100"
                     >
                       {item.text}
                     </div>
@@ -156,9 +183,12 @@ export default function App() {
                 isStreaming={state.isStreaming}
                 connected={state.connected}
                 commands={state.commands}
+                fileSearch={state.fileSearch}
                 prefill={state.editorPrefill}
                 onSend={prompt}
                 onAbort={abort}
+                onSearchFiles={searchFiles}
+                onClearFileSearch={clearFileSearch}
               />
               <ExtensionWidgets widgets={state.widgets} placement="belowEditor" />
               <ModelBar
@@ -182,4 +212,6 @@ export default function App() {
       <ExtensionNotifications notifications={state.notifications} onDismiss={dismissNotification} />
     </ThemeContext.Provider>
   );
-}
+});
+
+export default App;

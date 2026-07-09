@@ -6,13 +6,15 @@ import { FileTree } from "./FileTree";
 interface SidebarProps {
   tree: Record<string, DirState>;
   openFile: OpenFile | null;
+  /** Writable zone in the tree; see SessionSnapshot.writableRoot. */
+  writableRoot?: string | null;
   onExpand: (path: string) => void;
   onSelectFile: (path: string) => void;
   onClosePreview: () => void;
 }
 
 /** Collapsible file-browser sidebar: lazy tree + read-only preview. */
-export function Sidebar({ tree, openFile, onExpand, onSelectFile, onClosePreview }: SidebarProps) {
+export function Sidebar({ tree, openFile, writableRoot, onExpand, onSelectFile, onClosePreview }: SidebarProps) {
   useEffect(() => {
     if (tree[""] === undefined) onExpand("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -24,7 +26,13 @@ export function Sidebar({ tree, openFile, onExpand, onSelectFile, onClosePreview
         Files
       </div>
       <div className={`overflow-auto p-2 ${openFile ? "max-h-[40%]" : "flex-1"}`}>
-        <FileTree tree={tree} openFilePath={openFile?.path} onExpand={onExpand} onSelectFile={onSelectFile} />
+        <FileTree
+          tree={tree}
+          openFilePath={openFile?.path}
+          writableRoot={writableRoot}
+          onExpand={onExpand}
+          onSelectFile={onSelectFile}
+        />
       </div>
       {openFile && (
         <div className="min-h-0 flex-1 border-t border-zinc-200 dark:border-zinc-800">

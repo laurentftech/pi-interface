@@ -21,7 +21,7 @@ npm install
 npm run dev
 ```
 
-- Web UI: http://localhost:5173 (Vite dev server, proxies `/ws` to the agent server)
+- Web UI: http://localhost:5173 (Vite dev server, proxies `/ws`, `/branding`, `/health` to the agent server)
 - Agent server: ws://127.0.0.1:3141/ws
 
 The agent works in the directory the server is started from; override with `PI_CWD=/path/to/project`.
@@ -35,10 +35,12 @@ The agent works in the directory the server is started from; override with `PI_C
 - Steer / follow-up while streaming, abort
 - Model + thinking-level selectors
 - Session list / resume / new / delete
-- Collapsible file-browser sidebar: lazy-loaded tree + read-only preview (syntax-highlighted, Markdown rendered), confined to the same root the agent's own tools can see
+- Collapsible file-browser sidebar: lazy-loaded tree + read-only preview (syntax-highlighted, Markdown rendered), confined to the same root the agent's own tools can see; entries outside `sandbox.writableRoot` render dimmed
 - Slash commands with autocompletion (`/` in the composer: extension commands, prompt templates, skills)
+- File mentions with autocompletion (`@` in the composer: recursive name search over the browser root, inserts the relative path)
 - Extension "Custom UI" support: dialogs, notifications, status/widgets, editor prefill (see below)
 - Standalone mode: own config dir, file sandbox, branding (see below)
+- Embeddable widget (`@pi-interface/embed`): mount into any web app, isolated via Shadow DOM (see below)
 
 ## Standalone configuration
 
@@ -48,11 +50,14 @@ Optional. Create `pi-interface.config.json` next to where you launch the server 
 |-----|--------|
 | `cwd` | Agent working directory |
 | `agentDir` | Own config dir (auth, models, settings, sessions) — fully separate from `~/.pi/agent` |
-| `sandbox.root` | File tools (read/ls/grep/find) are confined to this directory, symlinks resolved. Defaults to `cwd` if omitted |
-| `sandbox.allowWrite` | Adds edit/write, still confined to the root (default `false`) |
+| `sandbox.root` | Read-only zone: read/ls/grep/find are confined to this directory, symlinks resolved. Defaults to `cwd` if omitted |
+| `sandbox.allowWrite` | Adds edit/write, confined to `sandbox.writableRoot` (or the whole root if unset) (default `false`) |
+| `sandbox.writableRoot` | Read-write zone: subdirectory of `root` that edit/write are further confined to. Must be inside `root`. Defaults to `root` itself |
 | `sandbox.allowBash` | Adds bash — **not path-confined**, explicit opt-in (default `false`) |
 | `tools` | Tool allowlist in non-sandbox mode, e.g. `["read","grep","find","ls"]` |
 | `noExtensions` / `extensionPaths` | Disable extension discovery / load only listed extensions |
+| `systemPrompt` / `systemPromptFile` | Replace pi's built-in system prompt entirely (mutually exclusive; `systemPromptFile` is a path to a text file). Project context files, skills, and `appendSystemPrompt` are still layered on top |
+| `appendSystemPrompt` | Array of extra paragraphs appended after the (built-in or custom) system prompt |
 | `server.port` | Port to listen on (default `3141`, or the `PORT` env var if set) |
 | `server.host` | Host to bind to (default `127.0.0.1` — only change this if you understand the security note above) |
 | `server.allowedOrigins` | Extra exact Origins accepted on the WebSocket (embed the UI as a tab in another app) |
@@ -62,17 +67,38 @@ Optional. Create `pi-interface.config.json` next to where you launch the server 
 
 ### Theming
 
-The UI ships with light and dark themes. Precedence: a local pick from the toggle button (persisted in `localStorage`) or a message from a host page beats `branding.defaultTheme`, which falls back to the OS preference (`"system"`).
+The UI ships with light and dark themes. Precedence: a local pick from the toggle button (persisted in `localStorage`) or an explicit override (the embed widget's `theme` option / `setTheme()`, or a host page's `postMessage`) beats `branding.defaultTheme`, which falls back to the OS preference (`"system"`).
 
-To embed pi-interface in another app that controls the theme, set `"allowThemeToggle": false` (hides the toggle) and drive the theme from the host page with:
+Relative paths are resolved against the config file's directory.
+
+## Embedding
+
+`embed/` publishes `@pi-interface/embed`, mounting pi-interface into any element inside a **Shadow DOM** — fully isolated from the host app's CSS in both directions, React supplied as a peer dependency (not bundled), everything else (Tailwind, markdown/mermaid/highlight.js, the shared protocol types) compiled into the package.
+
+```js
+import { mount } from "@pi-interface/embed";
+
+const widget = mount(document.getElementById("assistant"), {
+  serverUrl: "https://your-pi-interface-server", // omit for same-origin
+  theme: "dark", // optional; falls back to branding.defaultTheme, then "system"
+});
+
+widget.setTheme("light"); // change the theme at runtime
+widget.unmount(); // tear down the React tree
+```
+
+Build it with `npm run build --workspace @pi-interface/embed` (outputs ESM + CJS to `embed/dist/`, plus a rolled-up `.d.ts`), then publish `embed/` to your own registry.
+
+Two things to configure on the server side regardless of deployment topology:
+
+- **`server.allowedOrigins`**: the widget's WebSocket connection carries the *host page's* origin (e.g. `https://your-app.example.com`), not pi-interface's own — add it explicitly, even same-domain deployments need this (only `localhost`/`127.0.0.1` are trusted automatically).
+- **CORS**: `/branding` and `/health` are plain HTTP endpoints with no CORS headers. They work with zero extra config when the widget and the backend share an origin (recommended: reverse-proxy pi-interface under your own domain). A genuinely cross-origin deployment needs a CORS layer in front — not built in yet.
+
+A raw iframe (`<iframe src="https://your-pi-interface-server">`) still works too, and still honors `branding.allowThemeToggle: false` plus the host-driven theme channel:
 
 ```js
 iframeWindow.postMessage({ type: "pi-interface:set-theme", theme: "light" }, "https://your-pi-interface-origin")
 ```
-
-`theme` is `"light"`, `"dark"`, or `"system"`. This works whether or not the toggle is shown. Use the exact origin the UI is served from as the target, not `"*"`.
-
-Relative paths are resolved against the config file's directory.
 
 ### Extension Custom UI
 
@@ -93,7 +119,7 @@ web/  (React + Vite + Tailwind)          server/  (Fastify + ws)
 
 Sessions persist in `<agentDir>/sessions/` — reconnecting clients receive the full history (`hello` message).
 
-Planned: fork/tree navigation, images, embeddable build.
+Planned: fork/tree navigation, images.
 
 ## License
 

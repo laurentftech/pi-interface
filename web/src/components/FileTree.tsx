@@ -5,12 +5,22 @@ import type { DirState } from "../useAgent";
 interface TreeProps {
   tree: Record<string, DirState>;
   openFilePath?: string;
+  /** Writable zone; see SessionSnapshot.writableRoot. Entries outside it render dimmed. */
+  writableRoot?: string | null;
   onExpand: (path: string) => void;
   onSelectFile: (path: string) => void;
 }
 
 function isDir(type: DirEntry["type"]): boolean {
   return type === "directory" || type === "symlink-directory";
+}
+
+/** undefined writableRoot = no sandbox, nothing to dim; null = the whole tree is read-only. */
+function isReadOnly(fullPath: string, writableRoot: string | null | undefined): boolean {
+  if (writableRoot === undefined) return false;
+  if (writableRoot === null) return true;
+  if (writableRoot === "") return false;
+  return fullPath !== writableRoot && !fullPath.startsWith(`${writableRoot}/`);
 }
 
 function DirChildren({ path, depth, ...props }: TreeProps & { path: string; depth: number }) {
@@ -54,6 +64,7 @@ function TreeNode({
 }: TreeProps & { parentPath: string; entry: DirEntry; depth: number }) {
   const [open, setOpen] = useState(false);
   const fullPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+  const readOnly = isReadOnly(fullPath, props.writableRoot);
 
   if (isDir(entry.type)) {
     return (
@@ -69,7 +80,11 @@ function TreeNode({
           className="flex w-full items-center gap-1 rounded py-0.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800"
         >
           <span className="w-3 shrink-0 text-xs text-zinc-400 dark:text-zinc-600">{open ? "▾" : "▸"}</span>
-          <span className="truncate text-zinc-700 dark:text-zinc-300">{entry.name}</span>
+          <span
+            className={`truncate ${readOnly ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-700 dark:text-zinc-300"}`}
+          >
+            {entry.name}
+          </span>
         </button>
         {open && <DirChildren path={fullPath} depth={depth + 1} {...props} />}
       </div>
@@ -86,7 +101,9 @@ function TreeNode({
         selected ? "bg-zinc-100 dark:bg-zinc-800" : ""
       }`}
     >
-      <span className="truncate text-zinc-600 dark:text-zinc-400">{entry.name}</span>
+      <span className={`truncate ${readOnly ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-600 dark:text-zinc-400"}`}>
+        {entry.name}
+      </span>
     </button>
   );
 }

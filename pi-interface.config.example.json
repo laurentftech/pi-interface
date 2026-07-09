@@ -3,11 +3,13 @@
   "agentDir": "./.pi-interface-agent",
   "sandbox": {
     "root": "./workspace",
-    "allowWrite": false,
+    "allowWrite": true,
+    "writableRoot": "./workspace/scratch",
     "allowBash": false
   },
   "noExtensions": true,
   "extensionPaths": [],
+  "appendSystemPrompt": ["Only discuss topics related to this project."],
   "server": {
     "port": 3141,
     "host": "127.0.0.1",

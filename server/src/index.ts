@@ -33,7 +33,7 @@ import {
 import path from "node:path";
 import { loadConfig } from "./config.ts";
 import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
-import { FileBrowserError, listDirectory, readFileForPreview, resolveBrowserRoot } from "./fileBrowser.ts";
+import { FileBrowserError, listDirectory, readFileForPreview, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
 import { createSandboxedTools, isWithin, realResolve } from "./sandbox.ts";
 
 // npm workspace scripts run with cwd=server/ — INIT_CWD is where `npm run` was invoked
@@ -46,10 +46,55 @@ const AGENT_DIR = config.agentDir ?? getAgentDir();
 // Own agentDir ⇒ own session store, fully separate from ~/.pi/agent
 const SESSION_DIR = config.agentDir ? path.join(config.agentDir, "sessions") : undefined;
 
-// --- Agent session runtime ---------------------------------------------------
-
 const sandboxedTools = config.sandbox ? await createSandboxedTools(config.sandbox) : undefined;
 const BROWSER_ROOT = await resolveBrowserRoot(config);
+const WRITABLE_ROOT = await resolveWritableRoot(config, BROWSER_ROOT);
+
+// --- HTTP server ---------------------------------------------------------------
+//
+// Started now, before the AgentSessionRuntime below (which loads models, extensions,
+// and skills, and can take a few seconds) — branding is pure config with no session
+// dependency, so it must not wait behind that setup (that wait was showing up as a
+// flash of default branding on every page load). /ws and /health stay stubbed out
+// (WS connections are closed immediately, so the client's reconnect loop just
+// retries) until the runtime is ready and wires up the real handlers below.
+
+/**
+ * WebSocket connections are exempt from the same-origin policy: any webpage
+ * could otherwise connect to this localhost server and drive an agent that
+ * has bash/write tools. Only accept browser connections from local dev
+ * origins. Requests without an Origin header (non-browser clients: curl,
+ * native tools) are allowed — a local process already has shell access.
+ */
+const ORIGIN_ALLOWLIST = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+/** Local dev origins always pass; config.allowedOrigins adds exact origins for embedding. */
+function originAllowed(origin: string): boolean {
+  return ORIGIN_ALLOWLIST.test(origin) || config.allowedOrigins.includes(origin);
+}
+
+let handleWsConnection: (socket: WebSocket) => void = (socket) => {
+  socket.close(1013, "starting up");
+};
+let getHealth: () => { ok: boolean; sessionId?: string } = () => ({ ok: false });
+
+const app = Fastify({ logger: false });
+await app.register(websocket);
+app.get("/branding", () => config.branding);
+app.get("/ws", { websocket: true }, (socket, req) => {
+  const origin = req.headers.origin;
+  if (origin !== undefined && !originAllowed(origin)) {
+    console.warn(`[server] rejected ws connection from origin ${origin}`);
+    socket.close(1008, "forbidden origin");
+    return;
+  }
+  handleWsConnection(socket);
+});
+app.get("/health", () => getHealth());
+await app.listen({ port: PORT, host: HOST });
+console.log(`[server] ws://${HOST}:${PORT}/ws`);
+
+// --- Agent session runtime ---------------------------------------------------
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd,
@@ -64,6 +109,8 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
       ...(config.extensionPaths.length > 0
         ? { additionalExtensionPaths: config.extensionPaths }
         : {}),
+      ...(config.systemPrompt !== undefined ? { systemPrompt: config.systemPrompt } : {}),
+      ...(config.appendSystemPrompt.length > 0 ? { appendSystemPrompt: config.appendSystemPrompt } : {}),
     },
   });
   return {
@@ -158,6 +205,7 @@ function snapshot(): SessionSnapshot {
     models: availableModels(),
     commands: availableCommands(),
     contextUsage: contextUsage(),
+    writableRoot: WRITABLE_ROOT,
   };
 }
 
@@ -372,31 +420,43 @@ function cancelPendingExtensionRequests(): void {
 
 /** (Re)bind the extension runtime — UI bridge, mode, error reporting — to the current session. */
 async function bindExtensionsForSession(): Promise<void> {
-  await runtime.session.bindExtensions({
-    // Cast: structurally satisfies ExtensionUIContext (verified against the SDK's
-    // own RPC-mode implementation); see the `theme` getter above for the one gap.
-    uiContext: createExtensionUIContext() as any,
-    mode: "rpc",
-    // Extensions can call ctx.abort() themselves; no override needed here.
-    // commandContextActions (fork/tree navigation) isn't wired up — out of scope for the UI bridge.
-    shutdownHandler: () => {
-      // Unlike pi's one-shot RPC subprocess, this server is long-lived and shared
-      // across tabs/sessions — an extension asking to "shut down" shouldn't kill it.
-      console.warn("[pi] extension requested shutdown — ignored (pi-interface is a persistent server)");
-    },
-    onError: (err) => {
-      reportError(new Error(`[extension ${err.extensionPath}] ${err.error}`));
-    },
-  });
+  // runtime.session.bindExtensions() has been observed to never settle in some
+  // process contexts (e.g. spawned under `concurrently` / Start-Process, where
+  // stdout isn't a TTY). This warning surfaces that case instead of hanging silently.
+  const stallWarning = setTimeout(() => {
+    console.warn("[pi] bindExtensions has not resolved after 5s — extensions may be unavailable this session");
+  }, 5000);
+  try {
+    await runtime.session.bindExtensions({
+      // Cast: structurally satisfies ExtensionUIContext (verified against the SDK's
+      // own RPC-mode implementation); see the `theme` getter above for the one gap.
+      uiContext: createExtensionUIContext() as any,
+      mode: "rpc",
+      // Extensions can call ctx.abort() themselves; no override needed here.
+      // commandContextActions (fork/tree navigation) isn't wired up — out of scope for the UI bridge.
+      shutdownHandler: () => {
+        // Unlike pi's one-shot RPC subprocess, this server is long-lived and shared
+        // across tabs/sessions — an extension asking to "shut down" shouldn't kill it.
+        console.warn("[pi] extension requested shutdown — ignored (pi-interface is a persistent server)");
+      },
+      onError: (err) => {
+        reportError(new Error(`[extension ${err.extensionPath}] ${err.error}`));
+      },
+    });
+  } finally {
+    clearTimeout(stallWarning);
+  }
 }
+
+/** args of an in-flight edit/write call, captured at tool_execution_start and consumed at tool_execution_end. */
+const pendingFileMutations = new Map<string, unknown>();
 
 /**
  * Best-effort file-browser invalidation: if an edit/write tool touched a path inside
  * BROWSER_ROOT, tell clients so an expanded directory or open preview can refresh.
  * Not a security boundary — resolution failures or out-of-root paths are just skipped.
  */
-async function announceFileChange(toolName: string, args: unknown): Promise<void> {
-  if (toolName !== "edit" && toolName !== "write") return;
+async function announceFileChange(args: unknown): Promise<void> {
   const targetPath = (args as { path?: unknown } | null)?.path;
   if (typeof targetPath !== "string") return;
   try {
@@ -453,7 +513,9 @@ function bindSession(): () => void {
           toolName: event.toolName,
           args: event.args,
         });
-        void announceFileChange(event.toolName, event.args);
+        if (event.toolName === "edit" || event.toolName === "write") {
+          pendingFileMutations.set(event.toolCallId, event.args);
+        }
         break;
       case "tool_execution_update": {
         const text = contentText(event.partialResult?.content);
@@ -469,6 +531,13 @@ function bindSession(): () => void {
           isError: event.isError,
           text: truncate(contentText(event.result?.content)),
         });
+        {
+          const args = pendingFileMutations.get(event.toolCallId);
+          pendingFileMutations.delete(event.toolCallId);
+          // Only announce once the write has actually landed on disk — the client
+          // may otherwise refetch a directory/file before the change is visible.
+          if (args !== undefined && !event.isError) void announceFileChange(args);
+        }
         break;
       case "queue_update":
         broadcast({ type: "queue", steering: [...event.steering], followUp: [...event.followUp] });
@@ -492,7 +561,9 @@ function bindSession(): () => void {
 }
 
 let unsubscribe = bindSession();
-await bindExtensionsForSession();
+// Fire-and-forget: if this hangs (see the stall warning inside bindExtensionsForSession),
+// it must not block app.listen() below — the server should still come up without extensions.
+void bindExtensionsForSession().catch((err) => console.error(`[pi] bindExtensions failed: ${err}`));
 
 /** After runtime.newSession()/switchSession(), runtime.session is a new object. */
 async function rebindAndAnnounce(): Promise<void> {
@@ -623,6 +694,12 @@ async function handleReadFile(socket: WebSocket, filePath: string, requestId: st
   }
 }
 
+/** Composer's `@` mention autocomplete: recursive name search, confined to BROWSER_ROOT. */
+async function handleSearchFiles(socket: WebSocket, query: string, requestId: string): Promise<void> {
+  const results = await searchFiles(BROWSER_ROOT, query);
+  send(socket, { type: "file_search_results", requestId, query, results });
+}
+
 function handleClientMessage(socket: WebSocket, raw: string): void {
   let message: ClientMessage;
   try {
@@ -694,44 +771,23 @@ function handleClientMessage(socket: WebSocket, raw: string): void {
       if (typeof message.path !== "string" || typeof message.requestId !== "string") return;
       handleReadFile(socket, message.path, message.requestId).catch(reportError);
       break;
+    case "search_files":
+      if (typeof message.query !== "string" || typeof message.requestId !== "string") return;
+      handleSearchFiles(socket, message.query, message.requestId).catch(reportError);
+      break;
   }
 }
 
-// --- HTTP server -------------------------------------------------------------------
+// --- Wire up the real /ws and /health handlers, now that the runtime is ready ------
 
-const app = Fastify({ logger: false });
-await app.register(websocket);
-
-/**
- * WebSocket connections are exempt from the same-origin policy: any webpage
- * could otherwise connect to this localhost server and drive an agent that
- * has bash/write tools. Only accept browser connections from local dev
- * origins. Requests without an Origin header (non-browser clients: curl,
- * native tools) are allowed — a local process already has shell access.
- */
-const ORIGIN_ALLOWLIST = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
-
-/** Local dev origins always pass; config.allowedOrigins adds exact origins for embedding. */
-function originAllowed(origin: string): boolean {
-  return ORIGIN_ALLOWLIST.test(origin) || config.allowedOrigins.includes(origin);
-}
-
-app.get("/ws", { websocket: true }, (socket, req) => {
-  const origin = req.headers.origin;
-  if (origin !== undefined && !originAllowed(origin)) {
-    console.warn(`[server] rejected ws connection from origin ${origin}`);
-    socket.close(1008, "forbidden origin");
-    return;
-  }
+handleWsConnection = (socket) => {
   clients.add(socket);
   send(socket, { type: "hello", ...snapshot() });
   socket.on("message", (data: Buffer) => handleClientMessage(socket, data.toString()));
   socket.on("close", () => clients.delete(socket));
-});
+};
+getHealth = () => ({ ok: true, sessionId: runtime.session.sessionId });
 
-app.get("/health", () => ({ ok: true, sessionId: runtime.session.sessionId }));
-
-await app.listen({ port: PORT, host: HOST });
 console.log(`[pi] session ${runtime.session.sessionId}`);
 console.log(`[pi] model ${modelName()} · cwd ${AGENT_CWD} · agentDir ${AGENT_DIR}`);
 if (config.sandbox) {
@@ -742,7 +798,6 @@ if (config.sandbox) {
   console.log(`[pi] sandbox ${config.sandbox.root} · ${extras}`);
 }
 console.log(`[pi] file browser root ${BROWSER_ROOT}`);
-console.log(`[server] ws://${HOST}:${PORT}/ws`);
 
 // --- Shutdown -------------------------------------------------------------------------
 
