@@ -2,6 +2,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { OpenFile } from "../useAgent";
+import { CodeHighlight } from "./CodeHighlight";
 import { CopyButton } from "./CopyButton";
 
 function isMarkdown(path: string): boolean {
@@ -47,9 +48,7 @@ export function FilePreview({ file, onClose }: { file: OpenFile; onClose: () => 
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{file.content}</ReactMarkdown>
           </div>
         )}
-        {file.status === "loaded" && (!markdown || showRaw) && (
-          <pre className="whitespace-pre-wrap font-mono text-xs text-zinc-700 dark:text-zinc-300">{file.content}</pre>
-        )}
+        {file.status === "loaded" && (!markdown || showRaw) && <CodeHighlight code={file.content} path={file.path} />}
       </div>
     </div>
   );

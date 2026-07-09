@@ -69,3 +69,57 @@ body {
 .prose-chat td {
   @apply border px-2 py-1 border-zinc-200 dark:border-zinc-800;
 }
+
+/* Syntax highlighting (highlight.js token classes) for the file preview */
+.hljs {
+  @apply bg-transparent;
+}
+.hljs-comment,
+.hljs-quote {
+  @apply italic text-zinc-500;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-type,
+.hljs-built_in,
+.hljs-builtin-name {
+  @apply text-indigo-600 dark:text-indigo-400;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  @apply text-emerald-700 dark:text-emerald-400;
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  @apply text-amber-700 dark:text-amber-400;
+}
+.hljs-title,
+.hljs-section,
+.hljs-name {
+  @apply font-semibold text-sky-700 dark:text-sky-400;
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable {
+  @apply text-teal-700 dark:text-teal-300;
+}
+.hljs-tag {
+  @apply text-rose-700 dark:text-rose-400;
+}
+.hljs-meta,
+.hljs-link {
+  @apply text-violet-700 dark:text-violet-400;
+}
+.hljs-deletion {
+  @apply bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300;
+}
+.hljs-emphasis {
+  @apply italic;
+}
+.hljs-strong {
+  @apply font-bold;
+}
