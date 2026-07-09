@@ -2,6 +2,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatItem } from "@pi-interface/shared";
+import { CopyButton } from "./CopyButton";
 import { Mermaid } from "./Mermaid";
 
 type AssistantItem = Extract<ChatItem, { kind: "assistant" }>;
@@ -49,8 +50,14 @@ function PreBlock(props: React.HTMLAttributes<HTMLPreElement>) {
 }
 
 export function AssistantMessage({ item }: { item: AssistantItem }) {
+  const fullText = item.blocks
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("\n\n")
+    .trim();
+
   return (
-    <div className="max-w-none">
+    <div className="group max-w-none">
       {item.blocks.map((block, i) =>
         block.type === "thinking" ? (
           <ThinkingBlock key={block.contentIndex ?? i} text={block.text} />
@@ -65,6 +72,11 @@ export function AssistantMessage({ item }: { item: AssistantItem }) {
       {item.errorMessage && (
         <div className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
           {item.errorMessage}
+        </div>
+      )}
+      {fullText && !item.streaming && (
+        <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100">
+          <CopyButton text={fullText} />
         </div>
       )}
     </div>
