@@ -7,7 +7,7 @@
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { DirEntry } from "@pi-interface/shared";
+import type { DirEntry, FileSearchEntry } from "@pi-interface/shared";
 import type { AppConfig } from "./config.ts";
 import { isWithin, realResolve } from "./sandbox.ts";
 
@@ -118,4 +118,48 @@ export async function readFileForPreview(root: string, relPath: string): Promise
     throw new FileBrowserError("binary", "Binary file — preview not supported");
   }
   return { content: buffer.toString("utf8"), size: stat.size };
+}
+
+const SEARCH_IGNORED_NAMES = new Set(["node_modules", "dist", "build", ".git", ".next", ".turbo", "__pycache__"]);
+/** Guard against pathologically large trees — this is a UI convenience, not a full index. */
+const SEARCH_MAX_VISITED = 20_000;
+
+/**
+ * Recursively search file/directory names under `root` for `query` (case-insensitive
+ * substring match against the relative path). Powers the composer's `@` mention
+ * autocomplete — best-effort and capped, not a full-text or fuzzy search. Skips
+ * dotfiles, common build/dependency directories, and symlinks (avoids cycles).
+ */
+export async function searchFiles(root: string, query: string, limit = 20): Promise<FileSearchEntry[]> {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const results: FileSearchEntry[] = [];
+  let visited = 0;
+
+  async function walk(dir: string, relDir: string): Promise<void> {
+    if (results.length >= limit || visited >= SEARCH_MAX_VISITED) return;
+    let dirents: Dirent[];
+    try {
+      dirents = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const dirent of dirents) {
+      if (results.length >= limit || visited >= SEARCH_MAX_VISITED) return;
+      visited++;
+      if (dirent.isSymbolicLink() || dirent.name.startsWith(".") || SEARCH_IGNORED_NAMES.has(dirent.name)) continue;
+      const relPath = relDir ? `${relDir}/${dirent.name}` : dirent.name;
+      const isDirectory = dirent.isDirectory();
+      if (relPath.toLowerCase().includes(q)) {
+        results.push({ path: relPath, type: isDirectory ? "directory" : dirent.isFile() ? "file" : "other" });
+      }
+      if (isDirectory) {
+        await walk(path.join(dir, dirent.name), relPath);
+      }
+    }
+  }
+
+  await walk(root, "");
+  results.sort((a, b) => a.path.length - b.path.length || a.path.localeCompare(b.path));
+  return results.slice(0, limit);
 }

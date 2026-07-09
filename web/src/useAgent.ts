@@ -7,6 +7,7 @@ import type {
   ContextUsage,
   DirEntry,
   ExtensionUIRequest,
+  FileSearchEntry,
   ModelChoice,
   ServerMessage,
   SessionSummary,
@@ -35,6 +36,9 @@ export type OpenFile =
   | { status: "loaded"; path: string; content: string; size: number }
   | { status: "error"; path: string; message: string };
 
+/** Composer `@` mention autocomplete: results for the most recently issued search. */
+export type FileSearch = { status: "loading" | "loaded"; query: string; requestId: string; results: FileSearchEntry[] };
+
 export interface AgentState {
   connected: boolean;
   branding: Branding;
@@ -61,6 +65,7 @@ export interface AgentState {
   openFile: OpenFile | null;
   /** Writable zone in the file browser; see SessionSnapshot.writableRoot. */
   writableRoot?: string | null;
+  fileSearch: FileSearch | null;
 }
 
 const initialState: AgentState = {
@@ -86,6 +91,7 @@ const initialState: AgentState = {
   editorPrefill: null,
   fileTree: {},
   openFile: null,
+  fileSearch: null,
 };
 
 type Action =
@@ -96,7 +102,9 @@ type Action =
   | { type: "dialog_answered" }
   | { type: "dir_list_started"; path: string }
   | { type: "file_read_started"; path: string; requestId: string }
-  | { type: "close_file_preview" };
+  | { type: "close_file_preview" }
+  | { type: "file_search_started"; query: string; requestId: string }
+  | { type: "file_search_cleared" };
 
 /** Update the in-flight assistant item; append a new one when none exists (upsert). */
 function upsertLastAssistant(items: ChatItem[], update: (item: AssistantItem) => ChatItem): ChatItem[] {
@@ -171,6 +179,10 @@ function reduce(state: AgentState, action: Action): AgentState {
     return { ...state, openFile: { status: "loading", path: action.path, requestId: action.requestId } };
   }
   if (action.type === "close_file_preview") return { ...state, openFile: null };
+  if (action.type === "file_search_started") {
+    return { ...state, fileSearch: { status: "loading", query: action.query, requestId: action.requestId, results: [] } };
+  }
+  if (action.type === "file_search_cleared") return { ...state, fileSearch: null };
 
   const message = action.message;
   switch (message.type) {
@@ -268,6 +280,10 @@ function reduce(state: AgentState, action: Action): AgentState {
       }
       if (state.openFile?.status !== "loading" || state.openFile.requestId !== message.requestId) return state;
       return { ...state, openFile: { status: "error", path: message.path, message: message.message } };
+    case "file_search_results":
+      // Ignore stale responses from a since-superseded (or since-cleared) search
+      if (state.fileSearch?.requestId !== message.requestId) return state;
+      return { ...state, fileSearch: { ...state.fileSearch, status: "loaded", results: message.results } };
     case "extension_ui_request":
       switch (message.method) {
         case "select":
@@ -413,5 +429,12 @@ export function useAgent() {
       sendMessage({ type: "read_file", path, requestId });
     },
     closeFilePreview: () => dispatch({ type: "close_file_preview" }),
+    /** Search file/directory names for the composer's `@` mention autocomplete. */
+    searchFiles: (query: string) => {
+      const requestId = `search:${crypto.randomUUID()}`;
+      dispatch({ type: "file_search_started", query, requestId });
+      sendMessage({ type: "search_files", query, requestId });
+    },
+    clearFileSearch: () => dispatch({ type: "file_search_cleared" }),
   };
 }

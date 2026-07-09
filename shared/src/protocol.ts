@@ -125,6 +125,13 @@ export interface DirEntry {
   type: "file" | "directory" | "symlink-file" | "symlink-directory" | "other";
 }
 
+/** One match from a recursive file-name search (composer's `@` mention autocomplete). */
+export interface FileSearchEntry {
+  /** Path relative to the browser root (posix separators). */
+  path: string;
+  type: DirEntry["type"];
+}
+
 /** Snapshot of session state, sent on connect and after session replacement. */
 export interface SessionSnapshot {
   branding: Branding;
@@ -175,6 +182,7 @@ export type ServerMessage =
   | { type: "file_content"; requestId: string; path: string; content: string; size: number }
   | { type: "file_browser_error"; requestId: string; path: string; message: string }
   | { type: "file_changed"; path: string }
+  | { type: "file_search_results"; requestId: string; query: string; results: FileSearchEntry[] }
   | ExtensionUIRequest;
 
 /** Client -> server */
@@ -190,4 +198,5 @@ export type ClientMessage =
   | { type: "compact" }
   | { type: "list_directory"; path: string; requestId: string }
   | { type: "read_file"; path: string; requestId: string }
+  | { type: "search_files"; query: string; requestId: string }
   | ExtensionUIResponse;

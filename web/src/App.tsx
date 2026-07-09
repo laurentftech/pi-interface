@@ -30,6 +30,8 @@ export default function App() {
     listDirectory,
     readFile,
     closeFilePreview,
+    searchFiles,
+    clearFileSearch,
   } = useAgent();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { theme, toggle: toggleTheme } = useTheme(
@@ -157,9 +159,12 @@ export default function App() {
                 isStreaming={state.isStreaming}
                 connected={state.connected}
                 commands={state.commands}
+                fileSearch={state.fileSearch}
                 prefill={state.editorPrefill}
                 onSend={prompt}
                 onAbort={abort}
+                onSearchFiles={searchFiles}
+                onClearFileSearch={clearFileSearch}
               />
               <ExtensionWidgets widgets={state.widgets} placement="belowEditor" />
               <ModelBar

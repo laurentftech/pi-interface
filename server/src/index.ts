@@ -33,7 +33,7 @@ import {
 import path from "node:path";
 import { loadConfig } from "./config.ts";
 import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
-import { FileBrowserError, listDirectory, readFileForPreview, resolveBrowserRoot, resolveWritableRoot } from "./fileBrowser.ts";
+import { FileBrowserError, listDirectory, readFileForPreview, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
 import { createSandboxedTools, isWithin, realResolve } from "./sandbox.ts";
 
 // npm workspace scripts run with cwd=server/ — INIT_CWD is where `npm run` was invoked
@@ -648,6 +648,12 @@ async function handleReadFile(socket: WebSocket, filePath: string, requestId: st
   }
 }
 
+/** Composer's `@` mention autocomplete: recursive name search, confined to BROWSER_ROOT. */
+async function handleSearchFiles(socket: WebSocket, query: string, requestId: string): Promise<void> {
+  const results = await searchFiles(BROWSER_ROOT, query);
+  send(socket, { type: "file_search_results", requestId, query, results });
+}
+
 function handleClientMessage(socket: WebSocket, raw: string): void {
   let message: ClientMessage;
   try {
@@ -718,6 +724,10 @@ function handleClientMessage(socket: WebSocket, raw: string): void {
     case "read_file":
       if (typeof message.path !== "string" || typeof message.requestId !== "string") return;
       handleReadFile(socket, message.path, message.requestId).catch(reportError);
+      break;
+    case "search_files":
+      if (typeof message.query !== "string" || typeof message.requestId !== "string") return;
+      handleSearchFiles(socket, message.query, message.requestId).catch(reportError);
       break;
   }
 }
