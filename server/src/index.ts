@@ -21,6 +21,7 @@ import {
 import {
   type ClientMessage,
   type CommandInfo,
+  type ContextUsage,
   type ModelChoice,
   type ServerMessage,
   type SessionSnapshot,
@@ -87,6 +88,10 @@ function modelName(): string {
   return model ? `${model.provider}/${model.id}` : "unknown";
 }
 
+function contextUsage(): ContextUsage | undefined {
+  return runtime.session.getContextUsage();
+}
+
 function availableModels(): ModelChoice[] {
   return runtime.services.modelRegistry.getAvailable().map((model) => ({
     provider: model.provider,
@@ -147,6 +152,7 @@ function snapshot(): SessionSnapshot {
     items: historyToItems(session.messages as never, session.isStreaming),
     models: availableModels(),
     commands: availableCommands(),
+    contextUsage: contextUsage(),
   };
 }
 
@@ -174,9 +180,12 @@ function bindSession(): () => void {
       case "agent_start":
         broadcast({ type: "agent_start" });
         break;
-      case "agent_end":
+      case "agent_end": {
         broadcast({ type: "agent_end" });
+        const usage = contextUsage();
+        if (usage) broadcast({ type: "context_usage", usage });
         break;
+      }
       case "message_start":
         if (event.message.role === "assistant") {
           broadcast({ type: "assistant_start" });
@@ -226,6 +235,15 @@ function bindSession(): () => void {
       case "thinking_level_changed":
         broadcast({ type: "thinking_changed", level: event.level });
         break;
+      case "compaction_start":
+        broadcast({ type: "compaction_start" });
+        break;
+      case "compaction_end": {
+        broadcast({ type: "compaction_end", ...(event.errorMessage ? { errorMessage: event.errorMessage } : {}) });
+        const usage = contextUsage();
+        if (usage) broadcast({ type: "context_usage", usage });
+        break;
+      }
       default:
         break;
     }
@@ -394,6 +412,10 @@ function handleClientMessage(socket: WebSocket, raw: string): void {
       break;
     case "list_sessions":
       listSessions(socket).catch(reportError);
+      break;
+    case "compact":
+      // Failures surface via the compaction_end event (errorMessage) — avoid double-reporting.
+      runtime.session.compact().catch(() => {});
       break;
   }
 }

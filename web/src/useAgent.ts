@@ -4,6 +4,7 @@ import type {
   ChatItem,
   ClientMessage,
   CommandInfo,
+  ContextUsage,
   ModelChoice,
   ServerMessage,
   SessionSummary,
@@ -27,6 +28,8 @@ export interface AgentState {
   items: ChatItem[];
   queue: { steering: string[]; followUp: string[] };
   errors: string[];
+  contextUsage: ContextUsage | null;
+  isCompacting: boolean;
 }
 
 const initialState: AgentState = {
@@ -43,6 +46,8 @@ const initialState: AgentState = {
   items: [],
   queue: { steering: [], followUp: [] },
   errors: [],
+  contextUsage: null,
+  isCompacting: false,
 };
 
 type Action = { type: "connected" } | { type: "disconnected" } | { type: "server"; message: ServerMessage };
@@ -92,6 +97,8 @@ function applySnapshot(state: AgentState, message: ServerMessage & { sessionId: 
     items: message.items,
     queue: { steering: [], followUp: [] },
     errors: [],
+    contextUsage: message.contextUsage ?? null,
+    isCompacting: false,
   };
 }
 
@@ -169,6 +176,16 @@ function reduce(state: AgentState, action: Action): AgentState {
       };
     case "queue":
       return { ...state, queue: { steering: message.steering, followUp: message.followUp } };
+    case "context_usage":
+      return { ...state, contextUsage: message.usage };
+    case "compaction_start":
+      return { ...state, isCompacting: true };
+    case "compaction_end":
+      return {
+        ...state,
+        isCompacting: false,
+        errors: message.errorMessage ? [...state.errors, message.errorMessage] : state.errors,
+      };
     case "error":
       return { ...state, errors: [...state.errors, message.message] };
     default:
@@ -236,5 +253,6 @@ export function useAgent() {
     switchSession: (path: string) => sendMessage({ type: "switch_session", path }),
     deleteSession: (path: string) => sendMessage({ type: "delete_session", path }),
     listSessions: () => sendMessage({ type: "list_sessions" }),
+    compact: () => sendMessage({ type: "compact" }),
   };
 }

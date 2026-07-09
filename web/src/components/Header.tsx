@@ -1,23 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  type ModelChoice,
-  type SessionSummary,
-  THINKING_LEVELS,
-  type ThinkingLevel,
-} from "@pi-interface/shared";
+import type { SessionSummary } from "@pi-interface/shared";
 
 interface HeaderProps {
   title?: string;
-  model: string;
-  models: ModelChoice[];
-  thinkingLevel: string;
-  modelSupportsReasoning: boolean;
   sessions: SessionSummary[] | null;
   sessionId: string;
   isStreaming: boolean;
   connected: boolean;
-  onSetModel: (provider: string, id: string) => void;
-  onSetThinking: (level: ThinkingLevel) => void;
   onNewSession: () => void;
   onSwitchSession: (path: string) => void;
   onDeleteSession: (path: string) => void;
@@ -104,46 +93,13 @@ function SessionMenu({
 }
 
 export function Header(props: HeaderProps) {
-  const { model, models, thinkingLevel, modelSupportsReasoning, isStreaming, connected } = props;
+  const { isStreaming, connected } = props;
 
   return (
     <header className="flex items-center gap-3 border-b border-zinc-800 px-4 py-2.5">
       <span className="text-lg font-semibold tracking-tight" style={{ color: "var(--accent, inherit)" }}>
         {props.title ?? "π"}
       </span>
-
-      <select
-        value={model}
-        onChange={(e) => {
-          const choice = models.find((m) => `${m.provider}/${m.id}` === e.target.value);
-          if (choice) props.onSetModel(choice.provider, choice.id);
-        }}
-        disabled={isStreaming}
-        className="max-w-64 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 font-mono text-xs text-zinc-300 outline-none hover:border-zinc-600 disabled:opacity-50"
-      >
-        {!models.some((m) => `${m.provider}/${m.id}` === model) && <option value={model}>{model}</option>}
-        {models.map((m) => (
-          <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-            {m.provider}/{m.id}
-          </option>
-        ))}
-      </select>
-
-      {modelSupportsReasoning && (
-        <select
-          value={thinkingLevel}
-          onChange={(e) => props.onSetThinking(e.target.value as ThinkingLevel)}
-          disabled={isStreaming}
-          className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 font-mono text-xs text-zinc-300 outline-none hover:border-zinc-600 disabled:opacity-50"
-          title="thinking level"
-        >
-          {THINKING_LEVELS.map((level) => (
-            <option key={level} value={level}>
-              think: {level}
-            </option>
-          ))}
-        </select>
-      )}
 
       {isStreaming && (
         <span className="flex items-center gap-1.5 text-xs text-amber-400">

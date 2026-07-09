@@ -66,6 +66,15 @@ export interface Branding {
   accentColor?: string;
 }
 
+/** Context window usage, for the compaction button. */
+export interface ContextUsage {
+  /** Estimated context tokens, or null if unknown (e.g. right after compaction). */
+  tokens: number | null;
+  contextWindow: number;
+  /** Usage as a percentage of the context window, or null if tokens is unknown. */
+  percent: number | null;
+}
+
 /** Snapshot of session state, sent on connect and after session replacement. */
 export interface SessionSnapshot {
   branding: Branding;
@@ -76,6 +85,7 @@ export interface SessionSnapshot {
   items: ChatItem[];
   models: ModelChoice[];
   commands: CommandInfo[];
+  contextUsage?: ContextUsage;
 }
 
 /** Server -> client */
@@ -100,6 +110,9 @@ export type ServerMessage =
   | { type: "tool_update"; toolCallId: string; text: string }
   | { type: "tool_end"; toolCallId: string; isError: boolean; text: string }
   | { type: "queue"; steering: string[]; followUp: string[] }
+  | { type: "context_usage"; usage: ContextUsage }
+  | { type: "compaction_start" }
+  | { type: "compaction_end"; errorMessage?: string }
   | { type: "error"; message: string };
 
 /** Client -> server */
@@ -111,4 +124,5 @@ export type ClientMessage =
   | { type: "new_session" }
   | { type: "switch_session"; path: string }
   | { type: "delete_session"; path: string }
-  | { type: "list_sessions" };
+  | { type: "list_sessions" }
+  | { type: "compact" };

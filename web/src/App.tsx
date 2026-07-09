@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { AssistantMessage } from "./components/AssistantMessage";
 import { Composer } from "./components/Composer";
 import { Header } from "./components/Header";
+import { ModelBar } from "./components/ModelBar";
 import { ToolCard } from "./components/ToolCard";
 import { useAgent } from "./useAgent";
 
@@ -16,6 +17,7 @@ export default function App() {
     switchSession,
     deleteSession,
     listSessions,
+    compact,
   } = useAgent();
   const mainRef = useRef<HTMLElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -46,16 +48,10 @@ export default function App() {
     <div className="flex h-full flex-col">
       <Header
         title={state.branding.title}
-        model={state.model}
-        models={state.models}
-        thinkingLevel={state.thinkingLevel}
-        modelSupportsReasoning={state.modelSupportsReasoning}
         sessions={state.sessions}
         sessionId={state.sessionId}
         isStreaming={state.isStreaming}
         connected={state.connected}
-        onSetModel={setModel}
-        onSetThinking={setThinking}
         onNewSession={newSession}
         onSwitchSession={switchSession}
         onDeleteSession={deleteSession}
@@ -123,6 +119,18 @@ export default function App() {
             commands={state.commands}
             onSend={prompt}
             onAbort={abort}
+          />
+          <ModelBar
+            model={state.model}
+            models={state.models}
+            thinkingLevel={state.thinkingLevel}
+            modelSupportsReasoning={state.modelSupportsReasoning}
+            isStreaming={state.isStreaming}
+            contextUsage={state.contextUsage}
+            isCompacting={state.isCompacting}
+            onSetModel={setModel}
+            onSetThinking={setThinking}
+            onCompact={compact}
           />
         </div>
       </footer>
