@@ -127,6 +127,8 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
       ...(config.extensionPaths.length > 0
         ? { additionalExtensionPaths: config.extensionPaths }
         : {}),
+      ...(config.noSkills ? { noSkills: true } : {}),
+      ...(config.noPromptTemplates ? { noPromptTemplates: true } : {}),
       ...(config.systemPrompt !== undefined ? { systemPrompt: config.systemPrompt } : {}),
       ...(config.appendSystemPrompt.length > 0 ? { appendSystemPrompt: config.appendSystemPrompt } : {}),
       ...(seaExtensionFactories.length > 0 ? { extensionFactories: seaExtensionFactories } : {}),
@@ -164,7 +166,12 @@ function contextUsage(): ContextUsage | undefined {
 }
 
 function availableModels(): ModelChoice[] {
-  return runtime.services.modelRegistry.getAvailable().map((model) => ({
+  let models = runtime.services.modelRegistry.getAvailable();
+  if (config.allowedModels) {
+    const allowed = config.allowedModels;
+    models = models.filter((m) => allowed.some((a) => a.provider === m.provider && a.id === m.id));
+  }
+  return models.map((model) => ({
     provider: model.provider,
     id: model.id,
     name: model.name,
