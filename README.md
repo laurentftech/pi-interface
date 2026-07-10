@@ -68,6 +68,7 @@ Optional. Create `pi-interface.config.json` next to where you launch the server 
 | `sandbox.allowBash` | Adds bash — **not path-confined**, explicit opt-in (default `false`) |
 | `tools` | Tool allowlist in non-sandbox mode, e.g. `["read","grep","find","ls"]` |
 | `noExtensions` / `extensionPaths` | Disable extension discovery / load only listed extensions |
+| `noSkills` | Disable skill discovery entirely. Needed for real isolation: even with a custom `agentDir`, skills also auto-load from `~/.agents/skills` (hardcoded to the real home directory) and from `.agents/skills` walked up from `cwd` to the git root — neither is scoped by `agentDir` |
 | `systemPrompt` / `systemPromptFile` | Replace pi's built-in system prompt entirely (mutually exclusive; `systemPromptFile` is a path to a text file). Project context files, skills, and `appendSystemPrompt` are still layered on top |
 | `appendSystemPrompt` | Array of extra paragraphs appended after the (built-in or custom) system prompt |
 | `server.port` | Port to listen on (default `3141`, or the `PORT` env var if set) |

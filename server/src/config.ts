@@ -60,6 +60,13 @@ export interface AppConfig {
   noExtensions: boolean;
   /** Explicit extension paths to load (in addition to defaults). */
   extensionPaths: string[];
+  /**
+   * Skip loading skills entirely. Needed for real isolation even with a custom
+   * agentDir: skills also auto-load from ~/.agents/skills (hardcoded to the real
+   * home directory, not agentDir) and from .agents/skills walked up from cwd to
+   * the git root — neither is scoped by agentDir.
+   */
+  noSkills: boolean;
   /** Replace pi's built-in system prompt entirely (tool guidelines are lost — write your own). */
   systemPrompt?: string;
   /** Extra text appended after the (built-in or custom) system prompt, one entry per paragraph. */
@@ -110,6 +117,7 @@ export function loadConfig(baseCwd: string): AppConfig {
     cwd: baseCwd,
     noExtensions: false,
     extensionPaths: [],
+    noSkills: false,
     appendSystemPrompt: [],
     port: Number(process.env.PORT ?? 3141),
     host: "127.0.0.1",
@@ -169,6 +177,7 @@ export function loadConfig(baseCwd: string): AppConfig {
   config.tools = optionalStringArray(raw, "tools");
   config.noExtensions = optionalBoolean(raw, "noExtensions", false);
   config.extensionPaths = (optionalStringArray(raw, "extensionPaths") ?? []).map(resolve);
+  config.noSkills = optionalBoolean(raw, "noSkills", false);
 
   const systemPrompt = optionalString(raw, "systemPrompt");
   const systemPromptFile = optionalString(raw, "systemPromptFile");

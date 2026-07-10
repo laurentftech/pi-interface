@@ -9,6 +9,7 @@
   },
   "noExtensions": true,
   "extensionPaths": [],
+  "noSkills": true,
   "appendSystemPrompt": ["Only discuss topics related to this project."],
   "server": {
     "port": 3141,
