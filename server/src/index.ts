@@ -165,7 +165,12 @@ function contextUsage(): ContextUsage | undefined {
 }
 
 function availableModels(): ModelChoice[] {
-  return runtime.services.modelRegistry.getAvailable().map((model) => ({
+  let models = runtime.services.modelRegistry.getAvailable();
+  if (config.allowedModels) {
+    const allowed = config.allowedModels;
+    models = models.filter((m) => allowed.some((a) => a.provider === m.provider && a.id === m.id));
+  }
+  return models.map((model) => ({
     provider: model.provider,
     id: model.id,
     name: model.name,

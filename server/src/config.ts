@@ -67,6 +67,13 @@ export interface AppConfig {
    * the git root — neither is scoped by agentDir.
    */
   noSkills: boolean;
+  /**
+   * Restrict the model switcher to exactly these provider/id pairs. Without
+   * this, it lists every built-in model whose provider has configured auth —
+   * often dozens of variants the deployment doesn't actually serve (e.g. an
+   * air-gapped internal endpoint). Omit to keep the unrestricted list.
+   */
+  allowedModels?: { provider: string; id: string }[];
   /** Replace pi's built-in system prompt entirely (tool guidelines are lost — write your own). */
   systemPrompt?: string;
   /** Extra text appended after the (built-in or custom) system prompt, one entry per paragraph. */
@@ -103,6 +110,22 @@ function optionalStringArray(raw: Record<string, unknown>, key: string): string[
     fail(`"${key}" must be an array of strings`);
   }
   return value as string[];
+}
+
+function optionalModelList(
+  raw: Record<string, unknown>,
+  key: string,
+): { provider: string; id: string }[] | undefined {
+  const value = raw[key];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) fail(`"${key}" must be an array`);
+  return value.map((entry, i) => {
+    const obj = asObject(entry, `${key}[${i}]`);
+    const provider = optionalString(obj, "provider");
+    const id = optionalString(obj, "id");
+    if (!provider || !id) fail(`"${key}[${i}]" must have "provider" and "id" strings`);
+    return { provider, id };
+  });
 }
 
 function asObject(value: unknown, key: string): Record<string, unknown> {
@@ -178,6 +201,7 @@ export function loadConfig(baseCwd: string): AppConfig {
   config.noExtensions = optionalBoolean(raw, "noExtensions", false);
   config.extensionPaths = (optionalStringArray(raw, "extensionPaths") ?? []).map(resolve);
   config.noSkills = optionalBoolean(raw, "noSkills", false);
+  config.allowedModels = optionalModelList(raw, "allowedModels");
 
   const systemPrompt = optionalString(raw, "systemPrompt");
   const systemPromptFile = optionalString(raw, "systemPromptFile");
