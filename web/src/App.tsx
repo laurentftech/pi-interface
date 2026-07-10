@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { Theme } from "@pi-outpost/shared";
+import type { Theme, WireImage } from "@pi-outpost/shared";
 import { AssistantMessage } from "./components/AssistantMessage";
-import { Composer } from "./components/Composer";
+import { type Attachment, Composer, filesToAttachments } from "./components/Composer";
 import { CustomMessageCard } from "./components/CustomMessageCard";
 import { ExtensionDialog } from "./components/ExtensionDialog";
 import { ExtensionNotifications } from "./components/ExtensionNotifications";
@@ -55,6 +55,28 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
     clearFileSearch,
   } = useAgent(serverUrl);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
+  // Counter, not boolean: dragenter/dragleave fire for every child crossed
+  const [dragDepth, setDragDepth] = useState(0);
+
+  async function attachFiles(files: Iterable<File>) {
+    const { attachments: added, errors } = await filesToAttachments(files);
+    if (added.length > 0) setAttachments((current) => [...current, ...added]);
+    setAttachmentErrors(errors);
+  }
+
+  function sendPrompt(text: string, images?: WireImage[]) {
+    prompt(text, images);
+    setAttachments([]);
+    setAttachmentErrors([]);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragDepth(0);
+    if (e.dataTransfer.files.length > 0) void attachFiles(Array.from(e.dataTransfer.files));
+  }
   const { theme, toggle: toggleTheme, setTheme } = useTheme(
     initialTheme ?? state.branding.defaultTheme ?? "system",
     state.branding.allowThemeToggle !== false,
@@ -90,7 +112,22 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
 
   return (
     <ThemeContext.Provider value={theme}>
-      <div className="flex h-full">
+      <div
+        className="relative flex h-full"
+        onDragEnter={(e) => {
+          if (e.dataTransfer.types.includes("Files")) setDragDepth((d) => d + 1);
+        }}
+        onDragLeave={() => setDragDepth((d) => Math.max(0, d - 1))}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleDrop}
+      >
+        {dragDepth > 0 && (
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed bg-white/70 backdrop-blur-sm dark:bg-zinc-950/70" style={{ borderColor: "var(--accent, #3b82f6)" }}>
+            <p className="text-lg font-medium text-zinc-700 dark:text-zinc-200">
+              Drop files to attach (images &amp; text)
+            </p>
+          </div>
+        )}
         {sidebarOpen && (
           <Sidebar
             tree={state.fileTree}
@@ -138,6 +175,18 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
                       key={key}
                       className="ml-auto max-w-[85%] whitespace-pre-wrap rounded-xl bg-blue-100 px-4 py-2 text-[15px] text-blue-950 dark:bg-blue-950/60 dark:text-zinc-100"
                     >
+                      {item.images && item.images.length > 0 && (
+                        <div className="mb-1.5 flex flex-wrap gap-1.5">
+                          {item.images.map((image, j) => (
+                            <img
+                              key={j}
+                              src={`data:${image.mimeType};base64,${image.data}`}
+                              alt=""
+                              className="max-h-48 max-w-full rounded-lg object-contain"
+                            />
+                          ))}
+                        </div>
+                      )}
                       {item.text}
                     </div>
                   );
@@ -164,6 +213,14 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
                 </div>
               )}
 
+              {attachmentErrors.map((error, i) => (
+                <div
+                  key={`att${i}`}
+                  className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300"
+                >
+                  {error}
+                </div>
+              ))}
               {state.errors.map((error, i) => (
                 <div
                   key={i}
@@ -185,7 +242,10 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
                 commands={state.commands}
                 fileSearch={state.fileSearch}
                 prefill={state.editorPrefill}
-                onSend={prompt}
+                attachments={attachments}
+                onAttach={(files) => void attachFiles(files)}
+                onRemoveAttachment={(index) => setAttachments((current) => current.filter((_, i) => i !== index))}
+                onSend={sendPrompt}
                 onAbort={abort}
                 onSearchFiles={searchFiles}
                 onClearFileSearch={clearFileSearch}

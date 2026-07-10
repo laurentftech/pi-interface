@@ -30,6 +30,7 @@ import {
   type ServerMessage,
   type SessionSnapshot,
   THINKING_LEVELS,
+  type WireImage,
 } from "@pi-outpost/shared";
 import path from "node:path";
 import { loadConfig } from "./config.ts";
@@ -632,13 +633,31 @@ async function replaceSession(socket: WebSocket, action: () => Promise<{ cancell
   }
 }
 
-async function handlePrompt(text: string): Promise<void> {
+const MAX_IMAGES = 6;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // of base64 text
+
+/** Validate client-supplied attachments; reject anything that isn't a small image. */
+function validImages(images: unknown): WireImage[] | undefined {
+  if (images === undefined) return undefined;
+  if (!Array.isArray(images) || images.length > MAX_IMAGES) return undefined;
+  const valid: WireImage[] = [];
+  for (const image of images) {
+    const { data, mimeType } = (image ?? {}) as Partial<WireImage>;
+    if (typeof data !== "string" || data.length === 0 || data.length > MAX_IMAGE_BYTES) return undefined;
+    if (typeof mimeType !== "string" || !mimeType.startsWith("image/")) return undefined;
+    valid.push({ data, mimeType });
+  }
+  return valid;
+}
+
+async function handlePrompt(text: string, images?: WireImage[]): Promise<void> {
   const session = runtime.session;
   const options = {
     // Echo the user message only once accepted (avoids ghost bubbles on reject)
     preflightResult: (accepted: boolean) => {
-      if (accepted) broadcast({ type: "user", text });
+      if (accepted) broadcast({ type: "user", text, ...(images?.length ? { images } : {}) });
     },
+    ...(images?.length ? { images: images.map((i) => ({ type: "image" as const, ...i })) } : {}),
     ...(session.isStreaming ? { streamingBehavior: "steer" as const } : {}),
   };
   await session.prompt(text, options);
@@ -739,8 +758,14 @@ function handleClientMessage(socket: WebSocket, raw: string): void {
     case "prompt": {
       if (typeof message.text !== "string") return;
       const text = message.text.trim();
-      if (!text) return;
-      handlePrompt(text).catch(reportError);
+      const images = validImages(message.images);
+      if (message.images !== undefined && images === undefined) {
+        // Never drop a message silently: the client already cleared its composer
+        send(socket, { type: "error", message: "Attachments rejected (too large or invalid)" });
+        return;
+      }
+      if (!text && !images?.length) return;
+      handlePrompt(text || "(see attached images)", images).catch(reportError);
       break;
     }
     case "abort":

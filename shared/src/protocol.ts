@@ -4,9 +4,15 @@
  * (raw message_update events carry the full partial message on every delta).
  */
 
+/** Image attachment on the wire (raw base64, no data: prefix). */
+export interface WireImage {
+  data: string;
+  mimeType: string;
+}
+
 /** Chat item as displayed by the UI (also used to serialize history). */
 export type ChatItem =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; images?: WireImage[] }
   | {
       kind: "assistant";
       blocks: AssistantBlock[];
@@ -158,7 +164,7 @@ export type ServerMessage =
   | { type: "sessions"; sessions: SessionSummary[] }
   | { type: "model_changed"; model: string; reasoning: boolean }
   | { type: "thinking_changed"; level: string }
-  | { type: "user"; text: string }
+  | { type: "user"; text: string; images?: WireImage[] }
   | { type: "agent_start" }
   | { type: "agent_end" }
   | { type: "assistant_start" }
@@ -187,7 +193,7 @@ export type ServerMessage =
 
 /** Client -> server */
 export type ClientMessage =
-  | { type: "prompt"; text: string }
+  | { type: "prompt"; text: string; images?: WireImage[] }
   | { type: "abort" }
   | { type: "set_model"; provider: string; id: string }
   | { type: "set_thinking"; level: ThinkingLevel }

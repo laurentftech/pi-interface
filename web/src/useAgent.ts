@@ -12,6 +12,7 @@ import type {
   ServerMessage,
   SessionSummary,
   ThinkingLevel,
+  WireImage,
 } from "@pi-outpost/shared";
 
 type AssistantItem = Extract<ChatItem, { kind: "assistant" }>;
@@ -200,7 +201,13 @@ function reduce(state: AgentState, action: Action): AgentState {
     case "thinking_changed":
       return { ...state, thinkingLevel: message.level };
     case "user":
-      return { ...state, items: [...state.items, { kind: "user", text: message.text }] };
+      return {
+        ...state,
+        items: [
+          ...state.items,
+          { kind: "user", text: message.text, ...(message.images ? { images: message.images } : {}) },
+        ],
+      };
     case "agent_start":
       return { ...state, isStreaming: true, errors: [] };
     case "agent_end":
@@ -433,7 +440,8 @@ export function useAgent(serverUrl = "") {
 
   return {
     state,
-    prompt: (text: string) => sendMessage({ type: "prompt", text }),
+    prompt: (text: string, images?: WireImage[]) =>
+      sendMessage({ type: "prompt", text, ...(images?.length ? { images } : {}) }),
     abort: () => sendMessage({ type: "abort" }),
     setModel: (provider: string, id: string) => sendMessage({ type: "set_model", provider, id }),
     setThinking: (level: ThinkingLevel) => sendMessage({ type: "set_thinking", level }),

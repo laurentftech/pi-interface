@@ -10,7 +10,7 @@
     "build:sea": "node scripts/build-sea.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@earendil-works/pi-coding-agent": "^0.80.6",
     "@fastify/static": "^9.3.0",
     "@fastify/websocket": "^11.0.2",
     "@pi-outpost/shared": "*",

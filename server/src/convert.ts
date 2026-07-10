@@ -1,7 +1,7 @@
 /**
  * Conversion from SDK AgentMessage history to wire ChatItems.
  */
-import type { AssistantBlock, ChatItem } from "@pi-outpost/shared";
+import type { AssistantBlock, ChatItem, WireImage } from "@pi-outpost/shared";
 
 const MAX_TOOL_OUTPUT = 20_000;
 
@@ -12,6 +12,8 @@ interface AnyContent {
   id?: string;
   name?: string;
   arguments?: Record<string, unknown>;
+  data?: string;
+  mimeType?: string;
 }
 
 interface AnyMessage {
@@ -77,8 +79,25 @@ export function historyToItems(messages: AnyMessage[], streaming = false): ChatI
     trailingAssistantItem = undefined;
     switch (message.role) {
       case "user": {
-        const text = contentText(message.content);
-        if (text) items.push({ kind: "user", text });
+        // Text only — images render as thumbnails, no "[image]" marker needed
+        const text =
+          typeof message.content === "string"
+            ? message.content
+            : Array.isArray(message.content)
+              ? message.content
+                  .filter((c) => c.type === "text")
+                  .map((c) => c.text ?? "")
+                  .filter(Boolean)
+                  .join("\n")
+              : "";
+        const images: WireImage[] = Array.isArray(message.content)
+          ? message.content
+              .filter((c) => c.type === "image" && c.data && c.mimeType)
+              .map((c) => ({ data: c.data as string, mimeType: c.mimeType as string }))
+          : [];
+        if (text || images.length > 0) {
+          items.push({ kind: "user", text, ...(images.length > 0 ? { images } : {}) });
+        }
         break;
       }
       case "assistant": {
