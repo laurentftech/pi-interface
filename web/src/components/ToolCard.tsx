@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { ChatItem } from "@pi-outpost/shared";
+import { type DiffLine, diffLines, withContext } from "../diff";
 
 type ToolItem = Extract<ChatItem, { kind: "tool" }>;
 
@@ -15,8 +16,59 @@ function argsSummary(args: unknown): string {
   return json === "{}" ? "" : json;
 }
 
+/** The edit tool's before/after pairs, when this call has them. */
+function editPairs(item: ToolItem): { oldText: string; newText: string }[] | null {
+  if (item.toolName !== "edit" || item.args === null || typeof item.args !== "object") return null;
+  const edits = (item.args as { edits?: unknown }).edits;
+  if (!Array.isArray(edits)) return null;
+  const pairs = edits.filter(
+    (e): e is { oldText: string; newText: string } =>
+      e !== null && typeof e === "object" && typeof (e as Record<string, unknown>).oldText === "string" && typeof (e as Record<string, unknown>).newText === "string",
+  );
+  return pairs.length > 0 ? pairs : null;
+}
+
+/** The write tool's new content (rendered as an all-additions diff). */
+function writeContent(item: ToolItem): string | null {
+  if (item.toolName !== "write" || item.args === null || typeof item.args !== "object") return null;
+  const content = (item.args as { content?: unknown }).content;
+  return typeof content === "string" ? content : null;
+}
+
+function DiffBlock({ lines }: { lines: DiffLine[] }) {
+  return (
+    <pre className="max-h-72 overflow-auto rounded border border-zinc-200 font-mono text-xs leading-relaxed dark:border-zinc-800">
+      {withContext(lines).map((line, i) =>
+        line === null ? (
+          <div key={i} className="bg-zinc-100 px-2 text-center text-zinc-400 dark:bg-zinc-800/60 dark:text-zinc-600">
+            ⋯
+          </div>
+        ) : (
+          <div
+            key={i}
+            className={
+              line.type === "add"
+                ? "bg-emerald-50 px-2 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                : line.type === "del"
+                  ? "bg-red-50 px-2 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+                  : "px-2 text-zinc-500 dark:text-zinc-500"
+            }
+          >
+            {line.type === "add" ? "+ " : line.type === "del" ? "− " : "  "}
+            {line.text}
+          </div>
+        ),
+      )}
+    </pre>
+  );
+}
+
 export function ToolCard({ item }: { item: ToolItem }) {
-  const [open, setOpen] = useState(false);
+  const pairs = editPairs(item);
+  const written = writeContent(item);
+  const hasDiff = pairs !== null || written !== null;
+  // Agent file changes matter: show before/after without requiring a click
+  const [open, setOpen] = useState(hasDiff);
   const summary = argsSummary(item.args);
 
   return (
@@ -43,7 +95,19 @@ export function ToolCard({ item }: { item: ToolItem }) {
       </button>
       {open && (
         <div className="border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
-          {summary === "" || (
+          {pairs !== null && (
+            <div className="mb-2 flex flex-col gap-2">
+              {pairs.map((pair, i) => (
+                <DiffBlock key={i} lines={diffLines(pair.oldText, pair.newText)} />
+              ))}
+            </div>
+          )}
+          {written !== null && (
+            <div className="mb-2">
+              <DiffBlock lines={written.split("\n").map((text) => ({ type: "add" as const, text }))} />
+            </div>
+          )}
+          {hasDiff || summary === "" || (
             <pre className="mb-2 overflow-x-auto font-mono text-xs text-zinc-500 dark:text-zinc-400">
               {JSON.stringify(item.args, null, 2)}
             </pre>
