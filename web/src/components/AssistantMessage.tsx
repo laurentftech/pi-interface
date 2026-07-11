@@ -4,6 +4,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { ChatItem } from "@pi-outpost/shared";
+import { normalizeMathDelimiters } from "../markdownMath";
 import { CopyButton } from "./CopyButton";
 import { Mermaid } from "./Mermaid";
 
@@ -75,7 +76,7 @@ export function AssistantMessage({ item }: { item: AssistantItem }) {
               rehypePlugins={[rehypeKatex]}
               components={{ pre: PreBlock }}
             >
-              {block.text}
+              {normalizeMathDelimiters(block.text)}
             </ReactMarkdown>
           </div>
         ),

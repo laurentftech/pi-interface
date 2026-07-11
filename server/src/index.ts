@@ -36,7 +36,7 @@ import {
 import path from "node:path";
 import { loadConfig } from "./config.ts";
 import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
-import { FileBrowserError, listDirectory, readFileForPreview, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
+import { FileBrowserError, listDirectory, readFileForPreview, writeFileFromBrowser, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
 import { createSandboxedTools, isWithin, realResolve } from "./sandbox.ts";
 import { seaExtensionFactories } from "./sea-extensions.ts";
 
@@ -840,11 +840,33 @@ async function handleListDirectory(socket: WebSocket, dirPath: string, requestId
 /** File-browser sidebar: read a file for preview, confined to BROWSER_ROOT. */
 async function handleReadFile(socket: WebSocket, filePath: string, requestId: string): Promise<void> {
   try {
-    const { content, size } = await readFileForPreview(BROWSER_ROOT, filePath);
-    send(socket, { type: "file_content", requestId, path: filePath, content, size });
+    const { content, size, mtimeMs } = await readFileForPreview(BROWSER_ROOT, filePath);
+    send(socket, { type: "file_content", requestId, path: filePath, content, size, mtimeMs });
   } catch (error) {
     const message = error instanceof FileBrowserError ? error.message : `Unexpected error: ${(error as Error).message}`;
     send(socket, { type: "file_browser_error", requestId, path: filePath, message });
+  }
+}
+
+/** File viewer's editor: save a buffer back, confined to the writable zone (WRITABLE_ROOT). */
+async function handleWriteFile(
+  socket: WebSocket,
+  filePath: string,
+  content: string,
+  expectedMtimeMs: number,
+  force: boolean,
+  requestId: string,
+): Promise<void> {
+  try {
+    const { size, mtimeMs } = await writeFileFromBrowser(BROWSER_ROOT, WRITABLE_ROOT, filePath, content, expectedMtimeMs, force);
+    send(socket, { type: "file_written", requestId, path: filePath, size, mtimeMs });
+    broadcast({ type: "file_changed", path: filePath });
+  } catch (error) {
+    if (error instanceof FileBrowserError) {
+      send(socket, { type: "file_browser_error", requestId, path: filePath, message: error.message, reason: error.reason });
+    } else {
+      send(socket, { type: "file_browser_error", requestId, path: filePath, message: `Unexpected error: ${(error as Error).message}` });
+    }
   }
 }
 
@@ -930,6 +952,19 @@ function handleClientMessage(socket: WebSocket, raw: string): void {
     case "read_file":
       if (typeof message.path !== "string" || typeof message.requestId !== "string") return;
       handleReadFile(socket, message.path, message.requestId).catch(reportError);
+      break;
+    case "write_file":
+      if (
+        typeof message.path !== "string" ||
+        typeof message.content !== "string" ||
+        typeof message.expectedMtimeMs !== "number" ||
+        typeof message.requestId !== "string"
+      ) {
+        return;
+      }
+      handleWriteFile(socket, message.path, message.content, message.expectedMtimeMs, message.force === true, message.requestId).catch(
+        reportError,
+      );
       break;
     case "search_files":
       if (typeof message.query !== "string" || typeof message.requestId !== "string") return;

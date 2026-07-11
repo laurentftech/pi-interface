@@ -4,6 +4,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { ChatItem } from "@pi-outpost/shared";
+import { normalizeMathDelimiters } from "../markdownMath";
 
 type CustomItem = Extract<ChatItem, { kind: "custom" }>;
 
@@ -36,7 +37,7 @@ export function CustomMessageCard({ item }: { item: CustomItem }) {
       </div>
       <div className="prose-chat mt-1 text-violet-950 dark:text-violet-100">
         <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-          {item.text}
+          {normalizeMathDelimiters(item.text)}
         </ReactMarkdown>
       </div>
       {open && hasDetails && (

@@ -6,6 +6,7 @@ import { CustomMessageCard } from "./components/CustomMessageCard";
 import { ExtensionDialog } from "./components/ExtensionDialog";
 import { ExtensionNotifications } from "./components/ExtensionNotifications";
 import { ExtensionWidgets } from "./components/ExtensionWidgets";
+import { FileViewer } from "./components/FileViewer";
 import { Header } from "./components/Header";
 import { ModelBar } from "./components/ModelBar";
 import { Sidebar } from "./components/Sidebar";
@@ -53,6 +54,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
     dismissNotification,
     listDirectory,
     readFile,
+    writeFile,
     closeFilePreview,
     searchFiles,
     clearFileSearch,
@@ -138,7 +140,6 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
             writableRoot={state.writableRoot}
             onExpand={listDirectory}
             onSelectFile={readFile}
-            onClosePreview={closeFilePreview}
           />
         )}
         <div className="flex h-full min-w-0 flex-1 flex-col">
@@ -164,6 +165,18 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
             onForkSession={forkSession}
           />
 
+          <div className="relative flex min-h-0 flex-1 flex-col">
+          {state.openFile && (
+            <FileViewer
+              // Remount per file: edit drafts must never survive a switch to another path
+              key={state.openFile.path}
+              file={state.openFile}
+              writableRoot={state.writableRoot}
+              onClose={closeFilePreview}
+              onReload={readFile}
+              onSave={writeFile}
+            />
+          )}
           <main ref={mainRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
             <div className="mx-auto flex max-w-3xl flex-col gap-3 px-4 py-6">
               {state.items.length === 0 && (
@@ -239,6 +252,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
               <div ref={bottomRef} />
             </div>
           </main>
+          </div>
 
           <footer className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
             <div className="mx-auto max-w-3xl">

@@ -131,6 +131,9 @@ export interface DirEntry {
   type: "file" | "directory" | "symlink-file" | "symlink-directory" | "other";
 }
 
+/** Failure kinds of file-browser operations (list/read/write); carried on file_browser_error. */
+export type FileBrowserErrorReason = "outside-root" | "not-found" | "too-large" | "binary" | "denied" | "conflict";
+
 /** One match from a recursive file-name search (composer's `@` mention autocomplete). */
 export interface FileSearchEntry {
   /** Path relative to the browser root (posix separators). */
@@ -202,8 +205,16 @@ export type ServerMessage =
   | { type: "compaction_end"; errorMessage?: string }
   | { type: "error"; message: string }
   | { type: "directory_listing"; requestId: string; path: string; entries: DirEntry[] }
-  | { type: "file_content"; requestId: string; path: string; content: string; size: number }
-  | { type: "file_browser_error"; requestId: string; path: string; message: string }
+  | { type: "file_content"; requestId: string; path: string; content: string; size: number; mtimeMs: number }
+  | { type: "file_written"; requestId: string; path: string; size: number; mtimeMs: number }
+  | {
+      type: "file_browser_error";
+      requestId: string;
+      path: string;
+      message: string;
+      /** Machine-readable failure kind — absent for unexpected errors. */
+      reason?: FileBrowserErrorReason;
+    }
   | { type: "file_changed"; path: string }
   | { type: "file_search_results"; requestId: string; query: string; results: FileSearchEntry[] }
   | { type: "tree"; roots: TreeNode[] }
@@ -223,6 +234,16 @@ export type ClientMessage =
   | { type: "compact" }
   | { type: "list_directory"; path: string; requestId: string }
   | { type: "read_file"; path: string; requestId: string }
+  | {
+      type: "write_file";
+      path: string;
+      content: string;
+      /** mtimeMs from the file_content that populated the editor; the server refuses to overwrite a file that changed since. */
+      expectedMtimeMs: number;
+      /** Skip the mtime conflict check (user explicitly chose to overwrite a concurrent change). */
+      force?: boolean;
+      requestId: string;
+    }
   | { type: "search_files"; query: string; requestId: string }
   | { type: "list_tree" }
   | { type: "navigate_tree"; entryId: string }

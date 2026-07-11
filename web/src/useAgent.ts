@@ -35,7 +35,17 @@ export interface ExtensionWidget {
 export type DirState = DirEntry[] | "loading" | { error: string };
 export type OpenFile =
   | { status: "loading"; path: string; requestId: string }
-  | { status: "loaded"; path: string; content: string; size: number }
+  | {
+      status: "loaded";
+      path: string;
+      content: string;
+      size: number;
+      /** Disk mtime of `content`; echoed back on save so the server can refuse to clobber concurrent changes. */
+      mtimeMs: number;
+      /** In-flight write_file request — its content becomes `content` on file_written. */
+      pendingSave?: { requestId: string; content: string };
+      saveError?: { message: string; conflict: boolean };
+    }
   | { status: "error"; path: string; message: string };
 
 /** Composer `@` mention autocomplete: results for the most recently issued search. */
@@ -107,6 +117,7 @@ type Action =
   | { type: "dialog_answered" }
   | { type: "dir_list_started"; path: string }
   | { type: "file_read_started"; path: string; requestId: string }
+  | { type: "file_save_started"; path: string; requestId: string; content: string }
   | { type: "close_file_preview" }
   | { type: "file_search_started"; query: string; requestId: string }
   | { type: "file_search_cleared" }
@@ -175,7 +186,16 @@ function applySnapshot(state: AgentState, message: ServerMessage & { sessionId: 
 
 function reduce(state: AgentState, action: Action): AgentState {
   if (action.type === "connected") return { ...state, connected: true };
-  if (action.type === "disconnected") return { ...state, connected: false };
+  if (action.type === "disconnected") {
+    // An in-flight save will never be answered on this socket — surface a retryable
+    // error instead of leaving the editor stuck on "saving…"
+    const file = state.openFile;
+    const openFile =
+      file?.status === "loaded" && file.pendingSave !== undefined
+        ? { ...file, pendingSave: undefined, saveError: { message: "Connection lost while saving — try again", conflict: false } }
+        : state.openFile;
+    return { ...state, connected: false, openFile };
+  }
   // Fetched independently of the WS "hello" so it renders before the session is ready
   // (see the /branding fetch below); "hello" still wins if it arrives with a different value.
   if (action.type === "branding_loaded") return { ...state, branding: action.branding };
@@ -188,6 +208,15 @@ function reduce(state: AgentState, action: Action): AgentState {
   }
   if (action.type === "file_read_started") {
     return { ...state, openFile: { status: "loading", path: action.path, requestId: action.requestId } };
+  }
+  if (action.type === "file_save_started") {
+    const file = state.openFile;
+    // A save while disconnected would never be answered (sendMessage drops the frame)
+    if (!state.connected || file?.status !== "loaded" || file.path !== action.path) return state;
+    return {
+      ...state,
+      openFile: { ...file, pendingSave: { requestId: action.requestId, content: action.content }, saveError: undefined },
+    };
   }
   if (action.type === "close_file_preview") return { ...state, openFile: null };
   if (action.type === "file_search_started") {
@@ -297,13 +326,37 @@ function reduce(state: AgentState, action: Action): AgentState {
     case "file_content":
       // Ignore stale responses from a since-superseded read (user opened another file meanwhile)
       if (state.openFile?.status !== "loading" || state.openFile.requestId !== message.requestId) return state;
-      return { ...state, openFile: { status: "loaded", path: message.path, content: message.content, size: message.size } };
-    case "file_browser_error":
+      return {
+        ...state,
+        openFile: { status: "loaded", path: message.path, content: message.content, size: message.size, mtimeMs: message.mtimeMs },
+      };
+    case "file_written": {
+      const file = state.openFile;
+      if (file?.status !== "loaded" || file.pendingSave?.requestId !== message.requestId) return state;
+      return {
+        ...state,
+        openFile: { status: "loaded", path: file.path, content: file.pendingSave.content, size: message.size, mtimeMs: message.mtimeMs },
+      };
+    }
+    case "file_browser_error": {
       if (message.requestId.startsWith("dir:")) {
         return { ...state, fileTree: { ...state.fileTree, [message.path]: { error: message.message } } };
       }
+      if (message.requestId.startsWith("write:")) {
+        const file = state.openFile;
+        if (file?.status !== "loaded" || file.pendingSave?.requestId !== message.requestId) return state;
+        return {
+          ...state,
+          openFile: {
+            ...file,
+            pendingSave: undefined,
+            saveError: { message: message.message, conflict: message.reason === "conflict" },
+          },
+        };
+      }
       if (state.openFile?.status !== "loading" || state.openFile.requestId !== message.requestId) return state;
       return { ...state, openFile: { status: "error", path: message.path, message: message.message } };
+    }
     case "file_search_results":
       // Ignore stale responses from a since-superseded (or since-cleared) search
       if (state.fileSearch?.requestId !== message.requestId) return state;
@@ -484,6 +537,12 @@ export function useAgent(serverUrl = "") {
       sendMessage({ type: "read_file", path, requestId });
     },
     closeFilePreview: () => dispatch({ type: "close_file_preview" }),
+    /** Save the editor buffer back to disk; answered by file_written or a "write:" file_browser_error. */
+    writeFile: (path: string, content: string, expectedMtimeMs: number, force = false) => {
+      const requestId = `write:${crypto.randomUUID()}`;
+      dispatch({ type: "file_save_started", path, requestId, content });
+      sendMessage({ type: "write_file", path, content, expectedMtimeMs, ...(force ? { force } : {}), requestId });
+    },
     /** Search file/directory names for the composer's `@` mention autocomplete. */
     searchFiles: (query: string) => {
       const requestId = `search:${crypto.randomUUID()}`;

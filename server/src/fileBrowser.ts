@@ -1,20 +1,19 @@
 /**
- * Read-only file-browser backend for the sidebar: lists directories and
- * previews file contents, confined to the same root the agent's own tools
- * can see (SECURITY: reuses sandbox.ts's realResolve/isWithin — never
- * reinvent path confinement here).
+ * File-browser backend for the sidebar: lists directories, previews file
+ * contents, and saves editor buffers back, confined to the same root the
+ * agent's own tools can see — writes further confined to the writable zone
+ * (SECURITY: reuses sandbox.ts's realResolve/isWithin — never reinvent path
+ * confinement here).
  */
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { DirEntry, FileSearchEntry } from "@pi-outpost/shared";
+import type { DirEntry, FileBrowserErrorReason, FileSearchEntry } from "@pi-outpost/shared";
 import type { AppConfig } from "./config.ts";
 import { isWithin, realResolve } from "./sandbox.ts";
 
 /** Hard cap for file previews — refused outright above this, never silently truncated. */
 export const MAX_PREVIEW_BYTES = 1_048_576; // 1 MiB
-
-export type FileBrowserErrorReason = "outside-root" | "not-found" | "too-large" | "binary" | "denied";
 
 export class FileBrowserError extends Error {
   constructor(
@@ -98,7 +97,10 @@ function looksBinary(buffer: Buffer): boolean {
   return buffer.includes(0);
 }
 
-export async function readFileForPreview(root: string, relPath: string): Promise<{ content: string; size: number }> {
+export async function readFileForPreview(
+  root: string,
+  relPath: string,
+): Promise<{ content: string; size: number; mtimeMs: number }> {
   const resolved = await resolveConfined(root, relPath);
   let stat: Awaited<ReturnType<typeof fs.stat>>;
   try {
@@ -117,7 +119,76 @@ export async function readFileForPreview(root: string, relPath: string): Promise
   if (looksBinary(buffer)) {
     throw new FileBrowserError("binary", "Binary file — preview not supported");
   }
-  return { content: buffer.toString("utf8"), size: stat.size };
+  return { content: buffer.toString("utf8"), size: stat.size, mtimeMs: stat.mtimeMs };
+}
+
+/**
+ * Write a file back from the browser's editor. Permission mirrors the agent's own
+ * write tool: without a sandbox anything under the browser root is writable; with
+ * one, writes need `allowWrite` and must land inside the writable zone.
+ *
+ * `writableRel` is resolveWritableRoot's output (undefined = no sandbox, null =
+ * read-only sandbox, "" or subpath = writable zone relative to root).
+ *
+ * `expectedMtimeMs` must match the file's current mtime (from the file_content
+ * that populated the editor) — a mismatch or a missing file is a "conflict",
+ * refusing to clobber concurrent changes. `force` skips the mtime comparison
+ * (the user explicitly chose to overwrite); permission and size checks still
+ * apply, and only existing files can be saved either way.
+ */
+export async function writeFileFromBrowser(
+  root: string,
+  writableRel: string | null | undefined,
+  relPath: string,
+  content: string,
+  expectedMtimeMs: number,
+  force = false,
+): Promise<{ size: number; mtimeMs: number }> {
+  if (writableRel === null) {
+    throw new FileBrowserError("denied", "The sandbox is read-only");
+  }
+  const writableRoot = writableRel === undefined ? root : path.resolve(root, writableRel);
+  const resolved = await resolveConfined(root, relPath);
+  if (!isWithin(writableRoot, resolved)) {
+    throw new FileBrowserError("denied", `"${relPath}" is outside the writable zone`);
+  }
+  // UTF-8 byteLength >= UTF-16 length, so this rejects grossly oversized payloads
+  // before allocating a Buffer for them
+  if (content.length > MAX_PREVIEW_BYTES) {
+    throw new FileBrowserError("too-large", "Content is larger than the 1 MB limit");
+  }
+  const buffer = Buffer.from(content, "utf8");
+  if (buffer.byteLength > MAX_PREVIEW_BYTES) {
+    const mb = (buffer.byteLength / (1024 * 1024)).toFixed(1);
+    throw new FileBrowserError("too-large", `Content is ${mb} MB, larger than the 1 MB limit`);
+  }
+  // A NUL byte would make the saved file unreadable in the viewer (looksBinary refuses it on read)
+  if (looksBinary(buffer)) {
+    throw new FileBrowserError("binary", "Content contains binary data");
+  }
+  let stat: Awaited<ReturnType<typeof fs.stat>>;
+  try {
+    stat = await fs.stat(resolved);
+  } catch {
+    throw new FileBrowserError("conflict", `"${relPath}" no longer exists`);
+  }
+  if (!stat.isFile()) {
+    throw new FileBrowserError("not-found", `"${relPath}" is not a file`);
+  }
+  if (!force && stat.mtimeMs !== expectedMtimeMs) {
+    throw new FileBrowserError("conflict", `"${relPath}" changed on disk since it was opened`);
+  }
+  // Atomic replace: a crash mid-write must never leave a truncated file behind
+  const tmp = `${resolved}.pi-outpost-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.tmp`;
+  try {
+    await fs.writeFile(tmp, buffer, { mode: stat.mode });
+    await fs.rename(tmp, resolved);
+  } catch (error) {
+    await fs.rm(tmp, { force: true });
+    throw error;
+  }
+  const written = await fs.stat(resolved);
+  return { size: written.size, mtimeMs: written.mtimeMs };
 }
 
 const SEARCH_IGNORED_NAMES = new Set(["node_modules", "dist", "build", ".git", ".next", ".turbo", "__pycache__"]);
