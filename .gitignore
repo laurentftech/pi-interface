@@ -9,3 +9,4 @@ dist/
 .env
 .claude/settings.local.json
 .code-review-graph/
+.claude/settings.local.json
