@@ -68,6 +68,8 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [viewerDirty, setViewerDirty] = useState(false);
+  // Badge click in the tree opens the file straight onto its uncommitted diff
+  const [diffOnOpen, setDiffOnOpen] = useState(false);
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
   // Counter, not boolean: dragenter/dragleave fire for every child crossed
   const [dragDepth, setDragDepth] = useState(0);
@@ -150,7 +152,14 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
             writableRoot={state.writableRoot}
             gitFiles={state.gitStatus?.files}
             onExpand={listDirectory}
-            onSelectFile={readFile}
+            onSelectFile={(path) => {
+              setDiffOnOpen(false);
+              readFile(path);
+            }}
+            onSelectDiff={(path) => {
+              setDiffOnOpen(true);
+              readFile(path);
+            }}
           />
         )}
         <div className="flex h-full min-w-0 flex-1 flex-col">
@@ -191,6 +200,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
               isStreaming={state.isStreaming}
               onDirtyChange={setViewerDirty}
               gitState={state.gitStatus?.files[state.openFile.path]}
+              initialShowGitDiff={diffOnOpen}
               gitDiff={state.gitDiff}
               onFetchGitDiff={fetchGitDiff}
               onClearGitDiff={clearGitDiff}

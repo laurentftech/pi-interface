@@ -86,7 +86,9 @@ export interface GitStatusResult {
 }
 
 export async function gitStatus(root: string): Promise<GitStatusResult> {
-  const out = await runGit(root, ["status", "--porcelain=v2", "--branch", "--", "."]);
+  // -uall lists untracked files individually (default -unormal collapses a brand-new
+  // directory to one "dir/" entry, leaving the files inside without badges)
+  const out = await runGit(root, ["status", "--porcelain=v2", "--branch", "--untracked-files=all", "--", "."]);
   const result: GitStatusResult = { branch: "", ahead: 0, behind: 0, files: [] };
 
   // status paths are cwd-relative (cwd = browser root); the `-- .` pathspec already

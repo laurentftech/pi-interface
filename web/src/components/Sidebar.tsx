@@ -12,10 +12,11 @@ interface SidebarProps {
   gitFiles?: Record<string, GitFileState>;
   onExpand: (path: string) => void;
   onSelectFile: (path: string) => void;
+  onSelectDiff?: (path: string) => void;
 }
 
 /** Collapsible file-browser sidebar: lazy tree; selecting a file opens the FileViewer overlay. */
-export function Sidebar({ tree, openFile, writableRoot, gitFiles, onExpand, onSelectFile }: SidebarProps) {
+export function Sidebar({ tree, openFile, writableRoot, gitFiles, onExpand, onSelectFile, onSelectDiff }: SidebarProps) {
   useEffect(() => {
     if (tree[""] === undefined) onExpand("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -34,6 +35,7 @@ export function Sidebar({ tree, openFile, writableRoot, gitFiles, onExpand, onSe
           gitFiles={gitFiles}
           onExpand={onExpand}
           onSelectFile={onSelectFile}
+          onSelectDiff={onSelectDiff}
         />
       </div>
     </aside>

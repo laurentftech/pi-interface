@@ -21,6 +21,8 @@ interface FileViewerProps {
   onDirtyChange: (dirty: boolean) => void;
   /** Git status of this file, when it has uncommitted changes (enables the diff toggle). */
   gitState?: GitFileState;
+  /** Open straight onto the uncommitted diff (tree badge click). */
+  initialShowGitDiff?: boolean;
   /** Latest git_diff answer (may belong to another file — matched by path). */
   gitDiff: GitDiffState | null;
   onFetchGitDiff: (path: string) => void;
@@ -79,6 +81,7 @@ export function FileViewer({
   isStreaming,
   onDirtyChange,
   gitState,
+  initialShowGitDiff = false,
   gitDiff,
   onFetchGitDiff,
   onClearGitDiff,
@@ -87,7 +90,7 @@ export function FileViewer({
   onSave,
 }: FileViewerProps) {
   const [showRaw, setShowRaw] = useState(false);
-  const [showGitDiff, setShowGitDiff] = useState(false);
+  const [showGitDiff, setShowGitDiff] = useState(initialShowGitDiff);
   const [edit, setEdit] = useState<EditState | null>(null);
   // "done" = a reply finished while this viewer was covering the chat
   const [agentActivity, setAgentActivity] = useState<"idle" | "streaming" | "done">("idle");
@@ -177,8 +180,10 @@ export function FileViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty]);
 
-  // Fetched diff contents are per-file: drop them when this viewer unmounts
+  // Fetched diff contents are per-file: drop them when this viewer unmounts;
+  // when opened straight onto the diff (badge click), fetch it now
   useEffect(() => {
+    if (initialShowGitDiff) onFetchGitDiff(file.path);
     return () => onClearGitDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

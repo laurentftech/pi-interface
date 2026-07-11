@@ -11,6 +11,8 @@ interface TreeProps {
   gitFiles?: Record<string, GitFileState>;
   onExpand: (path: string) => void;
   onSelectFile: (path: string) => void;
+  /** Open the file directly on its uncommitted diff (badge click). */
+  onSelectDiff?: (path: string) => void;
 }
 
 const GIT_BADGE: Record<GitFileState, { label: string; className: string }> = {
@@ -21,10 +23,10 @@ const GIT_BADGE: Record<GitFileState, { label: string; className: string }> = {
   conflicted: { label: "C", className: "text-purple-600 dark:text-purple-400" },
 };
 
-/** Any git-changed file at or under this directory path? (drives the ● dot on directories) */
-function dirHasChanges(dirPath: string, gitFiles: Record<string, GitFileState> | undefined): boolean {
-  if (!gitFiles) return false;
-  return Object.keys(gitFiles).some((p) => p.startsWith(`${dirPath}/`));
+/** Number of git-changed files under this directory (badge on collapsed directories). */
+function dirChangeCount(dirPath: string, gitFiles: Record<string, GitFileState> | undefined): number {
+  if (!gitFiles) return 0;
+  return Object.keys(gitFiles).filter((p) => p.startsWith(`${dirPath}/`)).length;
 }
 
 function isDir(type: DirEntry["type"]): boolean {
@@ -101,9 +103,12 @@ function TreeNode({
           >
             {entry.name}
           </span>
-          {!open && dirHasChanges(fullPath, props.gitFiles) && (
-            <span className="ml-1 shrink-0 text-[10px] text-amber-500" title="contains changes">
-              ●
+          {!open && dirChangeCount(fullPath, props.gitFiles) > 0 && (
+            <span
+              className="ml-1 shrink-0 rounded bg-amber-100 px-1 font-mono text-[10px] font-bold text-amber-700 dark:bg-amber-950/60 dark:text-amber-400"
+              title={`${dirChangeCount(fullPath, props.gitFiles)} changed file(s) inside`}
+            >
+              {dirChangeCount(fullPath, props.gitFiles)}
             </span>
           )}
         </button>
@@ -113,24 +118,35 @@ function TreeNode({
   }
 
   const selected = fullPath === props.openFilePath;
+  const gitState = props.gitFiles?.[fullPath];
   return (
-    <button
-      type="button"
-      onClick={() => props.onSelectFile(fullPath)}
-      style={{ paddingLeft: depth * 12 + 16 }}
-      className={`flex w-full items-center rounded py-0.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+    <div
+      className={`flex w-full items-center rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
         selected ? "bg-zinc-100 dark:bg-zinc-800" : ""
       }`}
     >
-      <span className={`truncate ${readOnly ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-600 dark:text-zinc-400"}`}>
-        {entry.name}
-      </span>
-      {props.gitFiles?.[fullPath] && (
-        <span className={`ml-1 shrink-0 font-mono text-xs font-bold ${GIT_BADGE[props.gitFiles[fullPath]].className}`}>
-          {GIT_BADGE[props.gitFiles[fullPath]].label}
+      <button
+        type="button"
+        onClick={() => props.onSelectFile(fullPath)}
+        style={{ paddingLeft: depth * 12 + 16 }}
+        className="flex min-w-0 flex-1 items-center py-0.5 text-left"
+      >
+        <span className={`truncate ${readOnly ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-600 dark:text-zinc-400"}`}>
+          {entry.name}
         </span>
+      </button>
+      {gitState && (
+        <button
+          type="button"
+          onClick={() => (props.onSelectDiff ?? props.onSelectFile)(fullPath)}
+          title="Show uncommitted diff"
+          aria-label={`Show diff of ${entry.name}`}
+          className={`mr-1 shrink-0 rounded px-1 font-mono text-xs font-bold hover:bg-zinc-200 dark:hover:bg-zinc-700 ${GIT_BADGE[gitState].className}`}
+        >
+          {GIT_BADGE[gitState].label}
+        </button>
       )}
-    </button>
+    </div>
   );
 }
 
