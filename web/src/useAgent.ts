@@ -8,6 +8,8 @@ import type {
   DirEntry,
   ExtensionUIRequest,
   FileSearchEntry,
+  GitFileState,
+  GitLogEntry,
   ModelChoice,
   ServerMessage,
   SessionSummary,
@@ -51,6 +53,25 @@ export type OpenFile =
 /** Composer `@` mention autocomplete: results for the most recently issued search. */
 export type FileSearch = { status: "loading" | "loaded"; query: string; requestId: string; results: FileSearchEntry[] };
 
+/** Latest git working-tree status; null until the first git_status answer. */
+export interface GitStatusState {
+  branch: string;
+  ahead: number;
+  behind: number;
+  /** Browser-root-relative path → state. */
+  files: Record<string, GitFileState>;
+}
+
+export type GitDiffState =
+  | { path: string; before: string; after: string }
+  | { path: string; error: string };
+
+export interface GitShowState {
+  sha: string;
+  patch: string;
+  truncated: boolean;
+}
+
 export interface AgentState {
   connected: boolean;
   branding: Branding;
@@ -80,6 +101,12 @@ export interface AgentState {
   /** Writable zone in the file browser; see SessionSnapshot.writableRoot. */
   writableRoot?: string | null;
   fileSearch: FileSearch | null;
+  gitAvailable: boolean;
+  gitStatus: GitStatusState | null;
+  /** Worktree-vs-HEAD contents for the viewer's diff toggle. */
+  gitDiff: GitDiffState | null;
+  gitLog: GitLogEntry[] | null;
+  gitShow: GitShowState | null;
 }
 
 const initialState: AgentState = {
@@ -107,6 +134,11 @@ const initialState: AgentState = {
   fileTree: {},
   openFile: null,
   fileSearch: null,
+  gitAvailable: false,
+  gitStatus: null,
+  gitDiff: null,
+  gitLog: null,
+  gitShow: null,
 };
 
 type Action =
@@ -121,6 +153,9 @@ type Action =
   | { type: "close_file_preview" }
   | { type: "file_search_started"; query: string; requestId: string }
   | { type: "file_search_cleared" }
+  | { type: "git_diff_started"; path: string; requestId: string }
+  | { type: "git_diff_cleared" }
+  | { type: "git_show_cleared" }
   | { type: "branding_loaded"; branding: Branding };
 
 /** Update the in-flight assistant item; append a new one when none exists (upsert). */
@@ -181,6 +216,7 @@ function applySnapshot(state: AgentState, message: ServerMessage & { sessionId: 
     // Stale after any snapshot: navigate_tree re-sends it, session switches invalidate it
     tree: null,
     writableRoot: message.writableRoot,
+    gitAvailable: message.gitAvailable === true,
   };
 }
 
@@ -223,6 +259,9 @@ function reduce(state: AgentState, action: Action): AgentState {
     return { ...state, fileSearch: { status: "loading", query: action.query, requestId: action.requestId, results: [] } };
   }
   if (action.type === "file_search_cleared") return { ...state, fileSearch: null };
+  if (action.type === "git_diff_started") return { ...state, gitDiff: null };
+  if (action.type === "git_diff_cleared") return { ...state, gitDiff: null };
+  if (action.type === "git_show_cleared") return { ...state, gitShow: null, gitLog: state.gitLog };
 
   const message = action.message;
   switch (message.type) {
@@ -361,6 +400,24 @@ function reduce(state: AgentState, action: Action): AgentState {
       // Ignore stale responses from a since-superseded (or since-cleared) search
       if (state.fileSearch?.requestId !== message.requestId) return state;
       return { ...state, fileSearch: { ...state.fileSearch, status: "loaded", results: message.results } };
+    case "git_status": {
+      const files: Record<string, GitFileState> = {};
+      for (const file of message.files) files[file.path] = file.status;
+      return { ...state, gitStatus: { branch: message.branch, ahead: message.ahead, behind: message.behind, files } };
+    }
+    case "git_diff":
+      return { ...state, gitDiff: { path: message.path, before: message.before, after: message.after } };
+    case "git_log":
+      return { ...state, gitLog: message.entries };
+    case "git_show":
+      return { ...state, gitShow: { sha: message.sha, patch: message.patch, truncated: message.truncated } };
+    case "git_error":
+      // Diff failures belong in the viewer's diff pane (the error banner renders
+      // under the full-pane overlay where nobody can see it)
+      if (message.requestId.startsWith("gitdiff:")) {
+        return { ...state, gitDiff: state.openFile ? { path: state.openFile.path, error: message.message } : null };
+      }
+      return { ...state, errors: [...state.errors, `git: ${message.message}`] };
     case "extension_ui_request":
       switch (message.method) {
         case "select":
@@ -425,6 +482,10 @@ export function useAgent(serverUrl = "") {
   useEffect(() => {
     openFileRef.current = state.openFile;
   }, [state.openFile]);
+  const gitDiffPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    gitDiffPathRef.current = state.gitDiff?.path ?? null;
+  }, [state.gitDiff]);
 
   const sendMessage = useCallback((message: ClientMessage) => {
     const socket = socketRef.current;
@@ -432,6 +493,28 @@ export function useAgent(serverUrl = "") {
       socket.send(JSON.stringify(message));
     }
   }, []);
+
+  // Git status refetches are event-driven (connect, file_changed, agent_end) and can
+  // burst — coalesce to one in flight with a single trailing rerun.
+  const gitAvailableRef = useRef(false);
+  const gitStatusInFlight = useRef(false);
+  const gitStatusQueued = useRef(false);
+  const refreshGitStatus = useCallback(() => {
+    if (!gitAvailableRef.current) return;
+    if (gitStatusInFlight.current) {
+      gitStatusQueued.current = true;
+      return;
+    }
+    gitStatusInFlight.current = true;
+    sendMessage({ type: "git_status", requestId: `git:${crypto.randomUUID()}` });
+  }, [sendMessage]);
+  const gitStatusSettled = useCallback(() => {
+    gitStatusInFlight.current = false;
+    if (gitStatusQueued.current) {
+      gitStatusQueued.current = false;
+      refreshGitStatus();
+    }
+  }, [refreshGitStatus]);
 
   // Branding is pure config (no session dependency) and served as soon as the process
   // starts — fetch it directly instead of waiting on the WS "hello", which only arrives
@@ -482,13 +565,31 @@ export function useAgent(serverUrl = "") {
             dispatch({ type: "file_read_started", path: message.path, requestId });
             sendMessage({ type: "read_file", path: message.path, requestId });
           }
+          // An open "± diff" pane for this file would silently go stale otherwise
+          if (gitDiffPathRef.current === message.path) {
+            sendMessage({ type: "git_diff", path: message.path, requestId: `gitdiff:${crypto.randomUUID()}` });
+          }
+          refreshGitStatus();
           return;
+        }
+        if (message.type === "hello" || message.type === "session_replaced") {
+          gitAvailableRef.current = message.gitAvailable === true;
+          if (message.type === "hello") refreshGitStatus();
+        }
+        // Bash commands can change git state without any file_changed broadcast
+        if (message.type === "agent_end") refreshGitStatus();
+        if (message.type === "git_status" || (message.type === "git_error" && message.requestId.startsWith("git:"))) {
+          gitStatusSettled();
         }
         dispatch({ type: "server", message });
       };
       socket.onclose = () => {
         // Superseded sockets must not flip the indicator (StrictMode remount, reconnect races)
         if (socketRef.current !== socket) return;
+        // An in-flight git_status will never be answered on this socket — clear the
+        // coalescing flags or the branch chip/badges freeze until a page reload
+        gitStatusInFlight.current = false;
+        gitStatusQueued.current = false;
         dispatch({ type: "disconnected" });
         if (!disposed) retryTimer = window.setTimeout(connect, 1500);
       };
@@ -502,7 +603,7 @@ export function useAgent(serverUrl = "") {
       socketRef.current = null;
       socket?.close();
     };
-  }, [sendMessage, serverUrl]);
+  }, [sendMessage, serverUrl, refreshGitStatus, gitStatusSettled]);
 
   return {
     state,
@@ -550,5 +651,17 @@ export function useAgent(serverUrl = "") {
       sendMessage({ type: "search_files", query, requestId });
     },
     clearFileSearch: () => dispatch({ type: "file_search_cleared" }),
+    /** Manual git status refresh (event-driven refreshes are automatic). */
+    fetchGitStatus: refreshGitStatus,
+    /** Worktree-vs-HEAD contents for one file (answers land in state.gitDiff). */
+    fetchGitDiff: (path: string) => {
+      const requestId = `gitdiff:${crypto.randomUUID()}`;
+      dispatch({ type: "git_diff_started", path, requestId });
+      sendMessage({ type: "git_diff", path, requestId });
+    },
+    clearGitDiff: () => dispatch({ type: "git_diff_cleared" }),
+    fetchGitLog: (limit?: number) => sendMessage({ type: "git_log", ...(limit ? { limit } : {}), requestId: `gitlog:${crypto.randomUUID()}` }),
+    fetchGitShow: (sha: string) => sendMessage({ type: "git_show", sha, requestId: `gitshow:${crypto.randomUUID()}` }),
+    clearGitShow: () => dispatch({ type: "git_show_cleared" }),
   };
 }

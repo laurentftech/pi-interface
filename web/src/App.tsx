@@ -7,6 +7,7 @@ import { ExtensionDialog } from "./components/ExtensionDialog";
 import { ExtensionNotifications } from "./components/ExtensionNotifications";
 import { ExtensionWidgets } from "./components/ExtensionWidgets";
 import { FileViewer } from "./components/FileViewer";
+import { GitCommitView } from "./components/GitCommitView";
 import { Header } from "./components/Header";
 import { ModelBar } from "./components/ModelBar";
 import { Sidebar } from "./components/Sidebar";
@@ -58,6 +59,11 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
     closeFilePreview,
     searchFiles,
     clearFileSearch,
+    fetchGitDiff,
+    clearGitDiff,
+    fetchGitLog,
+    fetchGitShow,
+    clearGitShow,
   } = useAgent(serverUrl);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -142,6 +148,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
             tree={state.fileTree}
             openFile={state.openFile}
             writableRoot={state.writableRoot}
+            gitFiles={state.gitStatus?.files}
             onExpand={listDirectory}
             onSelectFile={readFile}
           />
@@ -167,6 +174,11 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
             onListTree={listTree}
             onNavigateTree={navigateTree}
             onForkSession={forkSession}
+            gitAvailable={state.gitAvailable}
+            gitStatus={state.gitStatus}
+            gitLog={state.gitLog}
+            onFetchGitLog={fetchGitLog}
+            onShowCommit={fetchGitShow}
           />
 
           <div className="relative flex min-h-0 flex-1 flex-col">
@@ -178,11 +190,16 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
               writableRoot={state.writableRoot}
               isStreaming={state.isStreaming}
               onDirtyChange={setViewerDirty}
+              gitState={state.gitStatus?.files[state.openFile.path]}
+              gitDiff={state.gitDiff}
+              onFetchGitDiff={fetchGitDiff}
+              onClearGitDiff={clearGitDiff}
               onClose={closeFilePreview}
               onReload={readFile}
               onSave={writeFile}
             />
           )}
+          {state.gitShow && <GitCommitView show={state.gitShow} onClose={clearGitShow} />}
           <main ref={mainRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
             <div className="mx-auto flex max-w-3xl flex-col gap-3 px-4 py-6">
               {state.items.length === 0 && (

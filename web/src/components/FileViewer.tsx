@@ -3,10 +3,13 @@ import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import type { GitFileState } from "@pi-outpost/shared";
+import { diffLines } from "../diff";
 import { normalizeMathDelimiters } from "../markdownMath";
-import type { OpenFile } from "../useAgent";
+import type { GitDiffState, OpenFile } from "../useAgent";
 import { CodeHighlight } from "./CodeHighlight";
 import { CopyButton } from "./CopyButton";
+import { SplitDiffBlock } from "./DiffBlocks";
 
 interface FileViewerProps {
   file: OpenFile;
@@ -16,6 +19,12 @@ interface FileViewerProps {
   isStreaming: boolean;
   /** Reports whether the editor holds unsaved changes (App auto-closes the viewer on prompt send only when it doesn't). */
   onDirtyChange: (dirty: boolean) => void;
+  /** Git status of this file, when it has uncommitted changes (enables the diff toggle). */
+  gitState?: GitFileState;
+  /** Latest git_diff answer (may belong to another file — matched by path). */
+  gitDiff: GitDiffState | null;
+  onFetchGitDiff: (path: string) => void;
+  onClearGitDiff: () => void;
   onClose: () => void;
   /** Refetch the file from disk (discards the edit baseline). */
   onReload: (path: string) => void;
@@ -64,8 +73,21 @@ interface EditState {
  * markdown) reading, and — inside the writable zone — a textarea edit mode whose
  * saves go through write_file with an mtime conflict guard.
  */
-export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onClose, onReload, onSave }: FileViewerProps) {
+export function FileViewer({
+  file,
+  writableRoot,
+  isStreaming,
+  onDirtyChange,
+  gitState,
+  gitDiff,
+  onFetchGitDiff,
+  onClearGitDiff,
+  onClose,
+  onReload,
+  onSave,
+}: FileViewerProps) {
   const [showRaw, setShowRaw] = useState(false);
+  const [showGitDiff, setShowGitDiff] = useState(false);
   const [edit, setEdit] = useState<EditState | null>(null);
   // "done" = a reply finished while this viewer was covering the chat
   const [agentActivity, setAgentActivity] = useState<"idle" | "streaming" | "done">("idle");
@@ -105,6 +127,13 @@ export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onC
   function reload() {
     setEdit(null);
     onReload(file.path);
+  }
+
+  function toggleGitDiff() {
+    const next = !showGitDiff;
+    setShowGitDiff(next);
+    if (next) onFetchGitDiff(file.path);
+    else onClearGitDiff();
   }
 
   // A successful save replaces content + mtime in state: leave edit mode back to the
@@ -148,10 +177,16 @@ export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty]);
 
+  // Fetched diff contents are per-file: drop them when this viewer unmounts
+  useEffect(() => {
+    return () => onClearGitDiff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-white dark:bg-zinc-950">
       <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2 dark:border-zinc-800">
-        {markdown && edit === null && (
+        {markdown && edit === null && !showGitDiff && (
           <button
             type="button"
             onClick={() => setShowRaw(!showRaw)}
@@ -161,12 +196,27 @@ export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onC
             {showRaw ? "⚏ rendered" : "⌗ source"}
           </button>
         )}
+        {gitState !== undefined && edit === null && (
+          <button
+            type="button"
+            onClick={toggleGitDiff}
+            aria-pressed={showGitDiff}
+            title={showGitDiff ? "Show file content" : "Show uncommitted changes (vs HEAD)"}
+            className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
+              showGitDiff
+                ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+            }`}
+          >
+            ± diff
+          </button>
+        )}
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-500 dark:text-zinc-400" title={file.path}>
           {file.path}
           {dirty && <span className="ml-1 text-amber-500">●</span>}
         </span>
         {loaded && edit === null && <CopyButton text={loaded.content} />}
-        {loaded && edit === null && writable && (
+        {loaded && edit === null && !showGitDiff && writable && (
           <button
             type="button"
             onClick={startEdit}
@@ -203,6 +253,7 @@ export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onC
           type="button"
           onClick={requestClose}
           title="Close (Esc)"
+          aria-label="Close file viewer"
           className="shrink-0 px-1 text-sm text-zinc-400 hover:text-zinc-600 dark:text-zinc-600 dark:hover:text-zinc-300"
         >
           ✕
@@ -227,7 +278,20 @@ export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onC
       )}
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {file.status === "loading" && edit === null && (
+        {showGitDiff && edit === null && (
+          <div className="p-4">
+            {gitDiff?.path === file.path && "error" in gitDiff && (
+              <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+                {gitDiff.error}
+              </div>
+            )}
+            {gitDiff?.path === file.path && "before" in gitDiff && (
+              <SplitDiffBlock fill lines={diffLines(gitDiff.before, gitDiff.after)} />
+            )}
+            {gitDiff?.path !== file.path && <div className="text-sm text-zinc-400 dark:text-zinc-600">loading diff…</div>}
+          </div>
+        )}
+        {file.status === "loading" && edit === null && !showGitDiff && (
           <div className="p-4 text-sm text-zinc-400 dark:text-zinc-600">loading…</div>
         )}
         {file.status === "error" && <div className="p-4 text-sm text-red-600 dark:text-red-400">{file.message}</div>}
@@ -245,10 +309,10 @@ export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onC
               }
             }}
             spellCheck={false}
-            className="h-full w-full resize-none bg-transparent p-4 font-mono text-[13px] leading-relaxed text-zinc-800 outline-none dark:text-zinc-200"
+            className="h-full w-full resize-none bg-transparent p-4 font-mono text-[13px] leading-relaxed text-zinc-800 outline-none ring-inset focus-visible:ring-1 focus-visible:ring-zinc-300 dark:text-zinc-200 dark:focus-visible:ring-zinc-700"
           />
         )}
-        {loaded && edit === null && markdown && !showRaw && (
+        {loaded && edit === null && !showGitDiff && markdown && !showRaw && (
           <div className="prose-chat mx-auto max-w-3xl p-4 text-zinc-700 dark:text-zinc-300">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
@@ -290,7 +354,7 @@ export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onC
             </ReactMarkdown>
           </div>
         )}
-        {loaded && edit === null && (!markdown || showRaw) && (
+        {loaded && edit === null && !showGitDiff && (!markdown || showRaw) && (
           <div className="p-4">
             <CodeHighlight code={loaded.content} path={file.path} />
           </div>
@@ -301,16 +365,17 @@ export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onC
         <button
           type="button"
           onClick={requestClose}
+          aria-live="polite"
           className="flex items-center gap-2 border-t border-zinc-200 px-3 py-2 text-left text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
         >
           {agentActivity === "streaming" ? (
             <>
-              <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+              <span aria-hidden className="h-2 w-2 animate-pulse motion-reduce:animate-none rounded-full bg-amber-500" />
               <span className="text-amber-700 dark:text-amber-400">π is replying…</span>
             </>
           ) : (
             <>
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              <span aria-hidden className="h-2 w-2 rounded-full bg-emerald-500" />
               <span className="text-emerald-700 dark:text-emerald-400">π replied</span>
             </>
           )}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ChatItem } from "@pi-outpost/shared";
-import { type DiffLine, diffLines, rowsWithContext, toSideBySide, withContext } from "../diff";
+import { diffLines } from "../diff";
+import { DiffBlock, SplitDiffBlock } from "./DiffBlocks";
 
 type ToolItem = Extract<ChatItem, { kind: "tool" }>;
 
@@ -35,74 +36,6 @@ function writeContent(item: ToolItem): string | null {
   return typeof content === "string" ? content : null;
 }
 
-/** Side-by-side before/after view for edit calls. */
-function SplitDiffBlock({ lines }: { lines: DiffLine[] }) {
-  return (
-    <div className="max-h-72 overflow-auto rounded border border-zinc-200 font-mono text-xs leading-relaxed dark:border-zinc-800">
-      {rowsWithContext(toSideBySide(lines)).map((row, i) =>
-        row === null ? (
-          <div key={i} className="bg-zinc-100 px-2 text-center text-zinc-400 dark:bg-zinc-800/60 dark:text-zinc-600">
-            ⋯
-          </div>
-        ) : (
-          <div key={i} className="grid grid-cols-2">
-            <div
-              className={`whitespace-pre-wrap break-words border-r border-zinc-200 px-2 dark:border-zinc-800 ${
-                row.changed
-                  ? row.left === null
-                    ? "bg-zinc-50 dark:bg-zinc-900/40"
-                    : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
-                  : "text-zinc-500 dark:text-zinc-500"
-              }`}
-            >
-              {row.left ?? " "}
-            </div>
-            <div
-              className={`whitespace-pre-wrap break-words px-2 ${
-                row.changed
-                  ? row.right === null
-                    ? "bg-zinc-50 dark:bg-zinc-900/40"
-                    : "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-                  : "text-zinc-500 dark:text-zinc-500"
-              }`}
-            >
-              {row.right ?? " "}
-            </div>
-          </div>
-        ),
-      )}
-    </div>
-  );
-}
-
-function DiffBlock({ lines }: { lines: DiffLine[] }) {
-  return (
-    <pre className="max-h-72 overflow-auto rounded border border-zinc-200 font-mono text-xs leading-relaxed dark:border-zinc-800">
-      {withContext(lines).map((line, i) =>
-        line === null ? (
-          <div key={i} className="bg-zinc-100 px-2 text-center text-zinc-400 dark:bg-zinc-800/60 dark:text-zinc-600">
-            ⋯
-          </div>
-        ) : (
-          <div
-            key={i}
-            className={
-              line.type === "add"
-                ? "bg-emerald-50 px-2 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-                : line.type === "del"
-                  ? "bg-red-50 px-2 text-red-700 dark:bg-red-950/40 dark:text-red-300"
-                  : "px-2 text-zinc-500 dark:text-zinc-500"
-            }
-          >
-            {line.type === "add" ? "+ " : line.type === "del" ? "− " : "  "}
-            {line.text}
-          </div>
-        ),
-      )}
-    </pre>
-  );
-}
-
 export function ToolCard({ item }: { item: ToolItem }) {
   const pairs = editPairs(item);
   const written = writeContent(item);
@@ -125,7 +58,7 @@ export function ToolCard({ item }: { item: ToolItem }) {
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
       >
         <span className={`h-2 w-2 shrink-0 rounded-full ${
-          item.running ? "animate-pulse bg-amber-400" : item.isError ? "bg-red-500" : "bg-emerald-500"
+          item.running ? "animate-pulse motion-reduce:animate-none bg-amber-400" : item.isError ? "bg-red-500" : "bg-emerald-500"
         }`} />
         <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{item.toolName}</span>
         {summary && (

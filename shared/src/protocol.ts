@@ -134,6 +134,23 @@ export interface DirEntry {
 /** Failure kinds of file-browser operations (list/read/write); carried on file_browser_error. */
 export type FileBrowserErrorReason = "outside-root" | "not-found" | "too-large" | "binary" | "denied" | "conflict";
 
+/** Working-tree state of one file, scoped to the browser root. */
+export type GitFileState = "modified" | "added" | "deleted" | "untracked" | "conflicted";
+
+export interface GitFileStatus {
+  /** Path relative to the browser root (posix separators). */
+  path: string;
+  status: GitFileState;
+}
+
+export interface GitLogEntry {
+  sha: string;
+  author: string;
+  /** ISO 8601 author date. */
+  date: string;
+  subject: string;
+}
+
 /** One match from a recursive file-name search (composer's `@` mention autocomplete). */
 export interface FileSearchEntry {
   /** Path relative to the browser root (posix separators). */
@@ -175,6 +192,8 @@ export interface SessionSnapshot {
    * sandbox is entirely read-only, or the writable subtree's path ("" = the whole root).
    */
   writableRoot?: string | null;
+  /** Whether the browser root is inside a git work tree (and git is installed). */
+  gitAvailable?: boolean;
 }
 
 /** Server -> client */
@@ -219,6 +238,11 @@ export type ServerMessage =
   | { type: "file_search_results"; requestId: string; query: string; results: FileSearchEntry[] }
   | { type: "tree"; roots: TreeNode[] }
   | { type: "editor_prefill"; text: string }
+  | { type: "git_status"; requestId: string; branch: string; ahead: number; behind: number; files: GitFileStatus[] }
+  | { type: "git_diff"; requestId: string; path: string; before: string; after: string }
+  | { type: "git_log"; requestId: string; entries: GitLogEntry[] }
+  | { type: "git_show"; requestId: string; sha: string; patch: string; truncated: boolean }
+  | { type: "git_error"; requestId: string; message: string }
   | ExtensionUIRequest;
 
 /** Client -> server */
@@ -248,4 +272,8 @@ export type ClientMessage =
   | { type: "list_tree" }
   | { type: "navigate_tree"; entryId: string }
   | { type: "fork_session"; entryId: string }
+  | { type: "git_status"; requestId: string }
+  | { type: "git_log"; limit?: number; requestId: string }
+  | { type: "git_diff"; path: string; requestId: string }
+  | { type: "git_show"; sha: string; requestId: string }
   | ExtensionUIResponse;

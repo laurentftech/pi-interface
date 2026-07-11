@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import type { GitFileState } from "@pi-outpost/shared";
 import type { DirState, OpenFile } from "../useAgent";
 import { FileTree } from "./FileTree";
 
@@ -7,12 +8,14 @@ interface SidebarProps {
   openFile: OpenFile | null;
   /** Writable zone in the tree; see SessionSnapshot.writableRoot. */
   writableRoot?: string | null;
+  /** Git status per path, for tree badges. */
+  gitFiles?: Record<string, GitFileState>;
   onExpand: (path: string) => void;
   onSelectFile: (path: string) => void;
 }
 
 /** Collapsible file-browser sidebar: lazy tree; selecting a file opens the FileViewer overlay. */
-export function Sidebar({ tree, openFile, writableRoot, onExpand, onSelectFile }: SidebarProps) {
+export function Sidebar({ tree, openFile, writableRoot, gitFiles, onExpand, onSelectFile }: SidebarProps) {
   useEffect(() => {
     if (tree[""] === undefined) onExpand("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -28,6 +31,7 @@ export function Sidebar({ tree, openFile, writableRoot, onExpand, onSelectFile }
           tree={tree}
           openFilePath={openFile?.path}
           writableRoot={writableRoot}
+          gitFiles={gitFiles}
           onExpand={onExpand}
           onSelectFile={onSelectFile}
         />

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { SessionSummary, TreeNode } from "@pi-outpost/shared";
+import type { GitLogEntry, SessionSummary, TreeNode } from "@pi-outpost/shared";
+import type { GitStatusState } from "../useAgent";
+import { GitMenu } from "./GitMenu";
 import { TreeMenu } from "./TreeMenu";
 
 interface HeaderProps {
@@ -14,6 +16,9 @@ interface HeaderProps {
   /** Extension setStatus() key/text pairs — see extensions.md#custom-ui. */
   statuses: Record<string, string>;
   sidebarOpen: boolean;
+  gitAvailable: boolean;
+  gitStatus: GitStatusState | null;
+  gitLog: GitLogEntry[] | null;
   onToggleSidebar: () => void;
   onToggleTheme: () => void;
   onNewSession: () => void;
@@ -23,6 +28,8 @@ interface HeaderProps {
   onListTree: () => void;
   onNavigateTree: (entryId: string) => void;
   onForkSession: (entryId: string) => void;
+  onFetchGitLog: () => void;
+  onShowCommit: (sha: string) => void;
 }
 
 function useClickOutside(onClose: () => void) {
@@ -89,8 +96,11 @@ function SessionMenu({
               {session.id !== sessionId && (
                 <button
                   type="button"
-                  onClick={() => onDeleteSession(session.path)}
+                  onClick={() => {
+                    if (window.confirm("Delete this session?")) onDeleteSession(session.path);
+                  }}
                   title="delete session"
+                  aria-label="Delete session"
                   className="mr-2 mt-2 rounded px-1.5 py-0.5 text-xs text-zinc-400 opacity-0 hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 dark:text-zinc-600 dark:hover:bg-red-950/60 dark:hover:text-red-400"
                 >
                   ✕
@@ -110,6 +120,7 @@ function ThemeToggle({ theme, onToggle }: { theme: "light" | "dark"; onToggle: (
       type="button"
       onClick={onToggle}
       title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
       className="rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
     >
       {theme === "dark" ? "☀" : "☾"}
@@ -122,13 +133,36 @@ export function Header(props: HeaderProps) {
 
   return (
     <header className="flex items-center gap-3 border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
+      {/* File/repo controls live on the left, the side their panel opens on */}
+      <button
+        type="button"
+        onClick={props.onToggleSidebar}
+        title={props.sidebarOpen ? "Hide files (panel opens on the left)" : "Show files"}
+        aria-pressed={props.sidebarOpen}
+        className={`rounded-md border px-2 py-1 text-xs ${
+          props.sidebarOpen
+            ? "border-zinc-400 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200"
+            : "border-zinc-300 text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
+        }`}
+      >
+        {props.sidebarOpen ? "◧" : "◨"} files
+      </button>
+      {props.gitAvailable && (
+        <GitMenu
+          status={props.gitStatus}
+          log={props.gitLog}
+          onFetchLog={props.onFetchGitLog}
+          onShowCommit={props.onShowCommit}
+        />
+      )}
+
       <span className="text-lg font-semibold tracking-tight" style={{ color: "var(--accent, inherit)" }}>
         {props.title ?? "π"}
       </span>
 
       {isStreaming && (
-        <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500 dark:bg-amber-400" />
+        <span aria-live="polite" className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+          <span className="h-1.5 w-1.5 animate-pulse motion-reduce:animate-none rounded-full bg-amber-500 dark:bg-amber-400" />
           working
         </span>
       )}
@@ -143,19 +177,6 @@ export function Header(props: HeaderProps) {
       ))}
 
       <div className="ml-auto flex items-center gap-2">
-        <button
-          type="button"
-          onClick={props.onToggleSidebar}
-          title={props.sidebarOpen ? "Hide files" : "Show files"}
-          aria-pressed={props.sidebarOpen}
-          className={`rounded-md border px-2 py-1 text-xs ${
-            props.sidebarOpen
-              ? "border-zinc-400 text-zinc-700 dark:border-zinc-600 dark:text-zinc-200"
-              : "border-zinc-300 text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
-          }`}
-        >
-          files
-        </button>
         {props.showThemeToggle && <ThemeToggle theme={props.theme} onToggle={props.onToggleTheme} />}
         <button
           type="button"

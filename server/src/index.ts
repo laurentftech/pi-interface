@@ -37,6 +37,7 @@ import path from "node:path";
 import { loadConfig } from "./config.ts";
 import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
 import { FileBrowserError, listDirectory, readFileForPreview, writeFileFromBrowser, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
+import { GitError, gitHeadContent, gitLog, gitShow, gitStatus, probeGit } from "./git.ts";
 import { createSandboxedTools, isWithin, realResolve } from "./sandbox.ts";
 import { seaExtensionFactories } from "./sea-extensions.ts";
 
@@ -53,6 +54,7 @@ const SESSION_DIR = config.agentDir ? path.join(config.agentDir, "sessions") : u
 const sandboxedTools = config.sandbox ? await createSandboxedTools(config.sandbox) : undefined;
 const BROWSER_ROOT = await resolveBrowserRoot(config);
 const WRITABLE_ROOT = await resolveWritableRoot(config, BROWSER_ROOT);
+const GIT = await probeGit(BROWSER_ROOT);
 
 // --- HTTP server ---------------------------------------------------------------
 //
@@ -234,6 +236,7 @@ function snapshot(): SessionSnapshot {
     commands: availableCommands(),
     contextUsage: contextUsage(),
     writableRoot: WRITABLE_ROOT,
+    gitAvailable: GIT !== null,
   };
 }
 
@@ -870,6 +873,65 @@ async function handleWriteFile(
   }
 }
 
+// --- Git (read-only, confined to BROWSER_ROOT via `-- .` pathspec) --------------
+
+function gitErrorMessage(error: unknown): string {
+  return error instanceof GitError || error instanceof FileBrowserError
+    ? error.message
+    : `Unexpected error: ${(error as Error).message}`;
+}
+
+async function handleGitStatus(socket: WebSocket, requestId: string): Promise<void> {
+  if (GIT === null) return send(socket, { type: "git_error", requestId, message: "git is not available" });
+  try {
+    const { branch, ahead, behind, files } = await gitStatus(BROWSER_ROOT);
+    send(socket, { type: "git_status", requestId, branch, ahead, behind, files });
+  } catch (error) {
+    send(socket, { type: "git_error", requestId, message: gitErrorMessage(error) });
+  }
+}
+
+/** Worktree-vs-HEAD contents of one file; missing sides (untracked/deleted) are "". */
+async function handleGitDiff(socket: WebSocket, filePath: string, requestId: string): Promise<void> {
+  if (GIT === null) return send(socket, { type: "git_error", requestId, message: "git is not available" });
+  try {
+    let after = "";
+    try {
+      after = (await readFileForPreview(BROWSER_ROOT, filePath)).content;
+    } catch (error) {
+      // A deleted file legitimately has no worktree side; confinement/size/binary still refuse
+      if (!(error instanceof FileBrowserError) || error.reason !== "not-found") throw error;
+    }
+    const before = await gitHeadContent(BROWSER_ROOT, GIT.toplevel, filePath);
+    if (before.includes("\0")) throw new FileBrowserError("binary", "Binary file — diff not supported");
+    if (Buffer.byteLength(before, "utf8") > 1_048_576) {
+      throw new FileBrowserError("too-large", "HEAD version is larger than the 1 MB limit");
+    }
+    send(socket, { type: "git_diff", requestId, path: filePath, before, after });
+  } catch (error) {
+    send(socket, { type: "git_error", requestId, message: gitErrorMessage(error) });
+  }
+}
+
+async function handleGitLog(socket: WebSocket, limit: number, requestId: string): Promise<void> {
+  if (GIT === null) return send(socket, { type: "git_error", requestId, message: "git is not available" });
+  try {
+    send(socket, { type: "git_log", requestId, entries: await gitLog(BROWSER_ROOT, limit) });
+  } catch (error) {
+    send(socket, { type: "git_error", requestId, message: gitErrorMessage(error) });
+  }
+}
+
+async function handleGitShow(socket: WebSocket, sha: string, requestId: string): Promise<void> {
+  if (GIT === null) return send(socket, { type: "git_error", requestId, message: "git is not available" });
+  try {
+    const { patch, truncated } = await gitShow(BROWSER_ROOT, sha);
+    send(socket, { type: "git_show", requestId, sha, patch, truncated });
+  } catch (error) {
+    send(socket, { type: "git_error", requestId, message: gitErrorMessage(error) });
+  }
+}
+
 /** Composer's `@` mention autocomplete: recursive name search, confined to BROWSER_ROOT. */
 async function handleSearchFiles(socket: WebSocket, query: string, requestId: string): Promise<void> {
   const results = await searchFiles(BROWSER_ROOT, query);
@@ -984,6 +1046,23 @@ function handleClientMessage(socket: WebSocket, raw: string): void {
     case "fork_session":
       if (typeof message.entryId !== "string") return;
       forkSession(socket, message.entryId).catch(reportError);
+      break;
+    case "git_status":
+      if (typeof message.requestId !== "string") return;
+      handleGitStatus(socket, message.requestId).catch(reportError);
+      break;
+    case "git_diff":
+      if (typeof message.path !== "string" || typeof message.requestId !== "string") return;
+      handleGitDiff(socket, message.path, message.requestId).catch(reportError);
+      break;
+    case "git_log":
+      if (typeof message.requestId !== "string") return;
+      if (message.limit !== undefined && typeof message.limit !== "number") return;
+      handleGitLog(socket, message.limit ?? 30, message.requestId).catch(reportError);
+      break;
+    case "git_show":
+      if (typeof message.sha !== "string" || typeof message.requestId !== "string") return;
+      handleGitShow(socket, message.sha, message.requestId).catch(reportError);
       break;
   }
 }

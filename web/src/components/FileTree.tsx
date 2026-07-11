@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { DirEntry } from "@pi-outpost/shared";
+import type { DirEntry, GitFileState } from "@pi-outpost/shared";
 import type { DirState } from "../useAgent";
 
 interface TreeProps {
@@ -7,8 +7,24 @@ interface TreeProps {
   openFilePath?: string;
   /** Writable zone; see SessionSnapshot.writableRoot. Entries outside it render dimmed. */
   writableRoot?: string | null;
+  /** Git status per browser-root-relative path; badges render from it. */
+  gitFiles?: Record<string, GitFileState>;
   onExpand: (path: string) => void;
   onSelectFile: (path: string) => void;
+}
+
+const GIT_BADGE: Record<GitFileState, { label: string; className: string }> = {
+  modified: { label: "M", className: "text-amber-600 dark:text-amber-400" },
+  added: { label: "A", className: "text-emerald-600 dark:text-emerald-400" },
+  untracked: { label: "U", className: "text-emerald-600 dark:text-emerald-400" },
+  deleted: { label: "D", className: "text-red-600 dark:text-red-400" },
+  conflicted: { label: "C", className: "text-purple-600 dark:text-purple-400" },
+};
+
+/** Any git-changed file at or under this directory path? (drives the ● dot on directories) */
+function dirHasChanges(dirPath: string, gitFiles: Record<string, GitFileState> | undefined): boolean {
+  if (!gitFiles) return false;
+  return Object.keys(gitFiles).some((p) => p.startsWith(`${dirPath}/`));
 }
 
 function isDir(type: DirEntry["type"]): boolean {
@@ -85,6 +101,11 @@ function TreeNode({
           >
             {entry.name}
           </span>
+          {!open && dirHasChanges(fullPath, props.gitFiles) && (
+            <span className="ml-1 shrink-0 text-[10px] text-amber-500" title="contains changes">
+              ●
+            </span>
+          )}
         </button>
         {open && <DirChildren path={fullPath} depth={depth + 1} {...props} />}
       </div>
@@ -104,6 +125,11 @@ function TreeNode({
       <span className={`truncate ${readOnly ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-600 dark:text-zinc-400"}`}>
         {entry.name}
       </span>
+      {props.gitFiles?.[fullPath] && (
+        <span className={`ml-1 shrink-0 font-mono text-xs font-bold ${GIT_BADGE[props.gitFiles[fullPath]].className}`}>
+          {GIT_BADGE[props.gitFiles[fullPath]].label}
+        </span>
+      )}
     </button>
   );
 }
