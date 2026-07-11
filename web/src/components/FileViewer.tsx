@@ -14,6 +14,8 @@ interface FileViewerProps {
   writableRoot?: string | null;
   /** The viewer covers the chat: surface agent activity so a running reply isn't invisible. */
   isStreaming: boolean;
+  /** Reports whether the editor holds unsaved changes (App auto-closes the viewer on prompt send only when it doesn't). */
+  onDirtyChange: (dirty: boolean) => void;
   onClose: () => void;
   /** Refetch the file from disk (discards the edit baseline). */
   onReload: (path: string) => void;
@@ -62,7 +64,7 @@ interface EditState {
  * markdown) reading, and — inside the writable zone — a textarea edit mode whose
  * saves go through write_file with an mtime conflict guard.
  */
-export function FileViewer({ file, writableRoot, isStreaming, onClose, onReload, onSave }: FileViewerProps) {
+export function FileViewer({ file, writableRoot, isStreaming, onDirtyChange, onClose, onReload, onSave }: FileViewerProps) {
   const [showRaw, setShowRaw] = useState(false);
   const [edit, setEdit] = useState<EditState | null>(null);
   // "done" = a reply finished while this viewer was covering the chat
@@ -139,6 +141,12 @@ export function FileViewer({ file, writableRoot, isStreaming, onClose, onReload,
     if (isStreaming) setAgentActivity("streaming");
     else setAgentActivity((current) => (current === "streaming" ? "done" : current));
   }, [isStreaming]);
+
+  useEffect(() => {
+    onDirtyChange(dirty);
+    return () => onDirtyChange(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty]);
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-white dark:bg-zinc-950">

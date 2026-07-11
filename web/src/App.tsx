@@ -61,6 +61,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
   } = useAgent(serverUrl);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [viewerDirty, setViewerDirty] = useState(false);
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
   // Counter, not boolean: dragenter/dragleave fire for every child crossed
   const [dragDepth, setDragDepth] = useState(0);
@@ -75,6 +76,9 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
     prompt(text, images);
     setAttachments([]);
     setAttachmentErrors([]);
+    // Sending a message means the user wants the conversation back — close the file
+    // viewer unless it holds unsaved edits (the viewer's activity strip covers that case)
+    if (!viewerDirty) closeFilePreview();
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -173,6 +177,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
               file={state.openFile}
               writableRoot={state.writableRoot}
               isStreaming={state.isStreaming}
+              onDirtyChange={setViewerDirty}
               onClose={closeFilePreview}
               onReload={readFile}
               onSave={writeFile}
