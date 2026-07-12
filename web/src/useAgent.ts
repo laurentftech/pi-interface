@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { bootstrapToken, storedToken, storeToken } from "./authToken";
 import type {
   Branding,
   ChatItem,
@@ -74,6 +75,8 @@ export interface GitShowState {
 
 export interface AgentState {
   connected: boolean;
+  /** The server refused our token (WS close 4401): show the token screen, stop reconnecting. */
+  authRequired: boolean;
   branding: Branding;
   sessionId: string;
   model: string;
@@ -111,6 +114,7 @@ export interface AgentState {
 
 const initialState: AgentState = {
   connected: false,
+  authRequired: false,
   branding: {},
   sessionId: "",
   model: "",
@@ -144,6 +148,8 @@ const initialState: AgentState = {
 type Action =
   | { type: "connected" }
   | { type: "disconnected" }
+  | { type: "auth_required" }
+  | { type: "auth_retrying" }
   | { type: "server"; message: ServerMessage }
   | { type: "dismiss_notification"; id: string }
   | { type: "dialog_answered" }
@@ -221,7 +227,9 @@ function applySnapshot(state: AgentState, message: ServerMessage & { sessionId: 
 }
 
 function reduce(state: AgentState, action: Action): AgentState {
-  if (action.type === "connected") return { ...state, connected: true };
+  if (action.type === "connected") return { ...state, connected: true, authRequired: false };
+  if (action.type === "auth_required") return { ...state, connected: false, authRequired: true };
+  if (action.type === "auth_retrying") return { ...state, authRequired: false };
   if (action.type === "disconnected") {
     // An in-flight save will never be answered on this socket — surface a retryable
     // error instead of leaving the editor stuck on "saving…"
@@ -458,20 +466,36 @@ function reduce(state: AgentState, action: Action): AgentState {
 }
 
 /** `serverUrl.replace(/^http/, "ws") + "/ws"`, or same-origin `/ws` when unset. */
-function wsUrlFor(serverUrl: string): string {
-  if (serverUrl) return `${serverUrl.replace(/^http/, "ws")}/ws`;
-  const protocol = location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${location.host}/ws`;
+function wsUrlFor(serverUrl: string, token: string | null): string {
+  const base = serverUrl
+    ? `${serverUrl.replace(/^http/, "ws")}/ws`
+    : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+  // Browsers cannot set headers on WebSockets — the token rides a query parameter
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
+
+/** WS close code the server sends for a bad/missing token (see WS_CLOSE_UNAUTHORIZED server-side). */
+const WS_CLOSE_UNAUTHORIZED = 4401;
 
 /**
  * `serverUrl` is the pi-outpost backend's origin (e.g. "https://api.example.com"),
  * used by the embeddable widget (`embed/src/mount.tsx`) whose page isn't served by
  * that backend. Defaults to "" — same-origin, the standalone app's behavior.
+ *
+ * `explicitToken` (embed hosts) wins over the ?token=/localStorage flow.
+ *
+ * `embedded` disables URL capture: the host page's ?token= parameter and
+ * history belong to the host app, the widget must not consume or rewrite them.
  */
-export function useAgent(serverUrl = "") {
+export function useAgent(serverUrl = "", explicitToken?: string, embedded = false) {
   const [state, dispatch] = useReducer(reduce, initialState);
   const socketRef = useRef<WebSocket | null>(null);
+  // Bumped when the user submits a token on the TokenGate — re-runs the connect effect
+  const [authNonce, setAuthNonce] = useState(0);
+  const tokenRef = useRef<string | null>(null);
+  if (authNonce === 0 && tokenRef.current === null) {
+    tokenRef.current = explicitToken ?? (embedded ? storedToken() : bootstrapToken());
+  }
   // Mirrors of state read from inside the stable onmessage closure below (which
   // must not be recreated per-render, so it can't close over fresh `state`).
   const fileTreeRef = useRef(state.fileTree);
@@ -521,7 +545,9 @@ export function useAgent(serverUrl = "") {
   // once the (slower) AgentSession runtime is ready.
   useEffect(() => {
     let cancelled = false;
-    fetch(`${serverUrl}/branding`)
+    fetch(`${serverUrl}/branding`, {
+      headers: tokenRef.current ? { Authorization: `Bearer ${tokenRef.current}` } : {},
+    })
       .then((res) => (res.ok ? (res.json() as Promise<Branding>) : null))
       .then((branding) => {
         if (!cancelled && branding) dispatch({ type: "branding_loaded", branding });
@@ -530,14 +556,14 @@ export function useAgent(serverUrl = "") {
     return () => {
       cancelled = true;
     };
-  }, [serverUrl]);
+  }, [serverUrl, authNonce]);
 
   useEffect(() => {
     let retryTimer: number | undefined;
     let disposed = false;
 
     function connect() {
-      const socket = new WebSocket(wsUrlFor(serverUrl));
+      const socket = new WebSocket(wsUrlFor(serverUrl, tokenRef.current));
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -583,13 +609,18 @@ export function useAgent(serverUrl = "") {
         }
         dispatch({ type: "server", message });
       };
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         // Superseded sockets must not flip the indicator (StrictMode remount, reconnect races)
         if (socketRef.current !== socket) return;
         // An in-flight git_status will never be answered on this socket — clear the
         // coalescing flags or the branch chip/badges freeze until a page reload
         gitStatusInFlight.current = false;
         gitStatusQueued.current = false;
+        if (event.code === WS_CLOSE_UNAUTHORIZED) {
+          // Bad token: retrying is pointless — show the token screen instead
+          dispatch({ type: "auth_required" });
+          return;
+        }
         dispatch({ type: "disconnected" });
         if (!disposed) retryTimer = window.setTimeout(connect, 1500);
       };
@@ -603,10 +634,17 @@ export function useAgent(serverUrl = "") {
       socketRef.current = null;
       socket?.close();
     };
-  }, [sendMessage, serverUrl, refreshGitStatus, gitStatusSettled]);
+  }, [sendMessage, serverUrl, refreshGitStatus, gitStatusSettled, authNonce]);
 
   return {
     state,
+    /** TokenGate submission: persist the token and reconnect with it. */
+    submitToken: (token: string) => {
+      storeToken(token);
+      tokenRef.current = token;
+      dispatch({ type: "auth_retrying" });
+      setAuthNonce((n) => n + 1);
+    },
     prompt: (text: string, images?: WireImage[]) =>
       sendMessage({ type: "prompt", text, ...(images?.length ? { images } : {}) }),
     abort: () => sendMessage({ type: "abort" }),

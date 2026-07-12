@@ -16,7 +16,8 @@
   "server": {
     "port": 3141,
     "host": "127.0.0.1",
-    "allowedOrigins": ["https://app.example.com"]
+    "allowedOrigins": ["https://app.example.com"],
+    "token": "replace-with-long-random-secret-or-use-PI_OUTPOST_TOKEN"
   },
   "branding": {
     "title": "My Assistant",

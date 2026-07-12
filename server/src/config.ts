@@ -89,6 +89,13 @@ export interface AppConfig {
   host: string;
   /** Extra exact Origins allowed on the WebSocket (for embedding in another app). */
   allowedOrigins: string[];
+  /**
+   * Shared secret required on the WebSocket and HTTP API when set. The
+   * PI_OUTPOST_TOKEN env variable overrides it (keeps secrets out of config
+   * files). Mandatory in practice when host is not loopback — use a long
+   * random value, e.g. `openssl rand -hex 32`.
+   */
+  token?: string;
   branding: BrandingConfig;
 }
 
@@ -243,6 +250,13 @@ export function loadConfig(baseCwd: string): AppConfig {
       }
     }
     config.allowedOrigins = origins;
+    config.token = optionalString(server, "token");
+  }
+  // Env wins over the config file so the secret never has to live on disk
+  const envToken = process.env.PI_OUTPOST_TOKEN;
+  if (envToken !== undefined) {
+    if (envToken === "") fail(`PI_OUTPOST_TOKEN must not be empty`);
+    config.token = envToken;
   }
 
   if (raw.branding !== undefined) {

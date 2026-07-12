@@ -6,7 +6,7 @@
  * malicious webpages in the user's own browser — WS is exempt from CORS).
  * The agent has bash/edit/write tools: never weaken either check.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
@@ -79,6 +79,24 @@ function originAllowed(origin: string): boolean {
   return ORIGIN_ALLOWLIST.test(origin) || config.allowedOrigins.includes(origin);
 }
 
+/**
+ * Timing-safe shared-token check. Hashing both sides first sidesteps
+ * timingSafeEqual's equal-length requirement without an early return that
+ * would leak the token's length.
+ */
+const expectedTokenDigest =
+  config.token !== undefined ? createHash("sha256").update(config.token).digest() : undefined;
+
+function tokenValid(candidate: unknown): boolean {
+  if (expectedTokenDigest === undefined) return true;
+  if (typeof candidate !== "string") return false;
+  const actual = createHash("sha256").update(candidate).digest();
+  return timingSafeEqual(expectedTokenDigest, actual);
+}
+
+/** WS close code for a bad/missing token (app-reserved range): tells the client to show the token screen instead of retrying. */
+const WS_CLOSE_UNAUTHORIZED = 4401;
+
 let handleWsConnection: (socket: WebSocket) => void = (socket) => {
   socket.close(1013, "starting up");
 };
@@ -86,7 +104,14 @@ let getHealth: () => { ok: boolean; sessionId?: string } = () => ({ ok: false })
 
 const app = Fastify({ logger: false });
 await app.register(websocket);
-app.get("/branding", () => config.branding);
+app.get("/branding", (req, reply) => {
+  const auth = req.headers.authorization;
+  if (!tokenValid(auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : undefined)) {
+    console.warn(`[server] rejected /branding request with bad or missing token from ${req.ip}`);
+    return reply.code(401).send({ error: "unauthorized" });
+  }
+  return config.branding;
+});
 app.get("/ws", { websocket: true }, (socket, req) => {
   const origin = req.headers.origin;
   if (origin !== undefined && !originAllowed(origin)) {
@@ -94,9 +119,22 @@ app.get("/ws", { websocket: true }, (socket, req) => {
     socket.close(1008, "forbidden origin");
     return;
   }
+  // Browsers cannot set headers on WebSockets, so the token rides a query
+  // parameter. Close AFTER the handshake with an app code — a pre-handshake
+  // rejection reads as an opaque 1006 that the client can't act on.
+  const token = new URL(req.url ?? "/ws", "http://localhost").searchParams.get("token");
+  if (!tokenValid(token ?? undefined)) {
+    console.warn(`[server] rejected ws connection with bad or missing token from ${req.ip}`);
+    socket.close(WS_CLOSE_UNAUTHORIZED, "unauthorized");
+    return;
+  }
   handleWsConnection(socket);
 });
-app.get("/health", () => getHealth());
+app.get("/health", () => {
+  const health = getHealth();
+  // With auth enabled, the public health probe must not leak the session id
+  return config.token !== undefined ? { ok: health.ok } : health;
+});
 
 // Serve the built web UI as a single deployable unit when present (`npm run build
 // --workspace web` first) — /branding, /ws, /health above take priority over it

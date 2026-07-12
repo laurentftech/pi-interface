@@ -11,6 +11,7 @@ import { GitCommitView } from "./components/GitCommitView";
 import { Header } from "./components/Header";
 import { ModelBar } from "./components/ModelBar";
 import { Sidebar } from "./components/Sidebar";
+import { TokenGate } from "./components/TokenGate";
 import { ToolCard } from "./components/ToolCard";
 import { ThemeContext } from "./ThemeContext";
 import { useAgent } from "./useAgent";
@@ -32,13 +33,16 @@ interface AppProps {
   rootElement?: HTMLElement;
   /** Overrides branding.defaultTheme (avoids a flash of the wrong theme before branding loads). */
   initialTheme?: Theme;
+  /** Auth token for servers with `server.token` set (embed hosts supply it programmatically). */
+  token?: string;
 }
 
-const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootElement, initialTheme }, ref) {
+const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootElement, initialTheme, token }, ref) {
   const embedded = rootElement !== undefined;
   const accentTarget = rootElement ?? document.documentElement;
   const {
     state,
+    submitToken,
     prompt,
     abort,
     setModel,
@@ -64,7 +68,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
     fetchGitLog,
     fetchGitShow,
     clearGitShow,
-  } = useAgent(serverUrl);
+  } = useAgent(serverUrl, token, embedded);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [viewerDirty, setViewerDirty] = useState(false);
@@ -126,6 +130,14 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
       accentTarget.style.setProperty("--accent", state.branding.accentColor);
     }
   }, [state.branding, state.extensionTitle, embedded, accentTarget]);
+
+  if (state.authRequired) {
+    return (
+      <ThemeContext.Provider value={theme}>
+        <TokenGate title={state.branding.title} onSubmit={submitToken} />
+      </ThemeContext.Provider>
+    );
+  }
 
   return (
     <ThemeContext.Provider value={theme}>

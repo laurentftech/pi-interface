@@ -50,7 +50,7 @@ npm run dev
 
 The agent works in the directory the server is started from; override with `PI_CWD=/path/to/project`.
 
-> **Security note:** the server binds to `127.0.0.1` and validates the WebSocket `Origin` header. The agent has bash/edit/write tools — never expose this server on a network without the sandbox config below.
+> **Security note:** the server binds to `127.0.0.1` and validates the WebSocket `Origin` header. The agent has bash/edit/write tools — never expose this server on a network without the sandbox config below **and** an auth token: set `server.token` (or the `PI_OUTPOST_TOKEN` env variable, which wins) to a long random secret, e.g. `openssl rand -hex 32`. Clients authenticate by opening `http://host:3141/?token=<secret>` once (stored locally, stripped from the URL) or via the embed widget's `token` option. Use a reverse proxy or Tailscale for transport encryption.
 
 ## Production (single process)
 
@@ -86,6 +86,7 @@ Optional. Create `pi-outpost.config.json` next to where you launch the server (o
 | `server.port` | Port to listen on (default `3141`, or the `PORT` env var if set) |
 | `server.host` | Host to bind to (default `127.0.0.1` — only change this if you understand the security note above) |
 | `server.allowedOrigins` | Extra exact Origins accepted on the WebSocket (embed the UI as a tab in another app) |
+| `server.token` | Shared secret required on the WebSocket and `/branding` when set (`PI_OUTPOST_TOKEN` env overrides). Mandatory in practice when `server.host` is not loopback |
 | `branding` | `title` (default `"π"`), `welcome` message, `accentColor` — applied by the web UI |
 | `branding.defaultTheme` | `"light"` \| `"dark"` \| `"system"` (default) — used when the client has no stored preference |
 | `branding.allowThemeToggle` | Show the theme toggle button (default `true`). Set `false` when embedding in a host app that drives the theme itself — see below |

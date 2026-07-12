@@ -10,6 +10,8 @@ export interface MountOptions {
   serverUrl?: string;
   /** Initial theme; falls back to the server's branding.defaultTheme, then "system". */
   theme?: Theme;
+  /** Auth token for servers with `server.token` set — the host app supplies it, no token screen shown. */
+  token?: string;
 }
 
 export interface MountHandle {
@@ -45,6 +47,7 @@ export function mount(container: HTMLElement, options: MountOptions = {}): Mount
       serverUrl: options.serverUrl,
       rootElement: container,
       initialTheme: options.theme,
+      token: options.token,
     }),
   );
 
