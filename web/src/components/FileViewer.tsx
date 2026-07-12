@@ -7,6 +7,7 @@ import type { GitFileState } from "@pi-outpost/shared";
 import { diffLines } from "../diff";
 import { normalizeMathDelimiters } from "../markdownMath";
 import type { GitDiffState, OpenFile } from "../useAgent";
+import { isImageFile, rawFileUrl, resolveRelativeHref } from "../workspacePath";
 import { CodeHighlight } from "./CodeHighlight";
 import { CopyButton } from "./CopyButton";
 import { SplitDiffBlock } from "./DiffBlocks";
@@ -31,6 +32,10 @@ interface FileViewerProps {
   /** Refetch the file from disk (discards the edit baseline). */
   onReload: (path: string) => void;
   onSave: (path: string, content: string, expectedMtimeMs: number, force?: boolean) => void;
+  /** Backend origin for the embed widget ("" = same-origin) — for /files/raw image URLs. */
+  serverUrl?: string;
+  /** Auth token appended to /files/raw image URLs (img can't send headers). */
+  token?: string | null;
 }
 
 function isMarkdown(path: string): boolean {
@@ -42,25 +47,6 @@ function isWritable(path: string, writableRoot: string | null | undefined): bool
   if (writableRoot === undefined) return true;
   if (writableRoot === null) return false;
   return writableRoot === "" || path === writableRoot || path.startsWith(`${writableRoot}/`);
-}
-
-/**
- * Resolve a markdown-relative href against the open file's directory, into a
- * browser-root-relative path ("/x" hrefs are treated as root-relative). ".."
- * clamps at the root — the server rejects escapes anyway.
- */
-function resolveRelativeHref(currentPath: string, href: string): string {
-  const clean = href.split(/[?#]/)[0];
-  const segments = clean.startsWith("/")
-    ? clean.split("/")
-    : [...currentPath.split("/").slice(0, -1), ...clean.split("/")];
-  const out: string[] = [];
-  for (const segment of segments) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === "..") out.pop();
-    else out.push(segment);
-  }
-  return out.join("/");
 }
 
 /** Baseline captured when Edit mode starts; saves are validated against it. */
@@ -88,6 +74,8 @@ export function FileViewer({
   onClose,
   onReload,
   onSave,
+  serverUrl = "",
+  token = null,
 }: FileViewerProps) {
   const [showRaw, setShowRaw] = useState(false);
   const [showGitDiff, setShowGitDiff] = useState(initialShowGitDiff);
@@ -101,6 +89,9 @@ export function FileViewer({
 
   const loaded = file.status === "loaded" ? file : null;
   const markdown = loaded !== null && isMarkdown(file.path);
+  // Images can't travel the text-preview protocol (read_file answers "binary");
+  // the viewer loads them straight from /files/raw instead and ignores that error.
+  const image = isImageFile(file.path);
   const writable = isWritable(file.path, writableRoot);
   const dirty = edit !== null && edit.draft !== edit.baseContent;
   const saving = loaded?.pendingSave !== undefined;
@@ -296,10 +287,21 @@ export function FileViewer({
             {gitDiff?.path !== file.path && <div className="text-sm text-zinc-400 dark:text-zinc-600">loading diff…</div>}
           </div>
         )}
-        {file.status === "loading" && edit === null && !showGitDiff && (
+        {image && edit === null && !showGitDiff && (
+          <div className="flex h-full items-center justify-center p-4">
+            <img
+              src={rawFileUrl(serverUrl, file.path, token)}
+              alt={file.path}
+              className="max-h-full max-w-full rounded object-contain"
+            />
+          </div>
+        )}
+        {file.status === "loading" && edit === null && !showGitDiff && !image && (
           <div className="p-4 text-sm text-zinc-400 dark:text-zinc-600">loading…</div>
         )}
-        {file.status === "error" && <div className="p-4 text-sm text-red-600 dark:text-red-400">{file.message}</div>}
+        {file.status === "error" && !image && (
+          <div className="p-4 text-sm text-red-600 dark:text-red-400">{file.message}</div>
+        )}
         {/* Keyed on `edit`, not `loaded`: the post-save file_changed refetch flips the file
             to "loading" for a moment and must not unmount the textarea (focus/caret loss) */}
         {edit !== null && (
@@ -352,6 +354,15 @@ export function FileViewer({
                       {children}
                     </a>
                   );
+                },
+                // Relative image references resolve against this file's directory
+                // and load through /files/raw (the text protocol refuses binary)
+                img: ({ src, alt, ...rest }) => {
+                  const resolved =
+                    typeof src === "string" && src !== "" && !/^[a-z][a-z0-9+.-]*:/i.test(src) && !src.startsWith("//")
+                      ? rawFileUrl(serverUrl, resolveRelativeHref(file.path, src), token)
+                      : src;
+                  return <img {...rest} src={resolved} alt={alt ?? ""} loading="lazy" className="max-w-full rounded-lg" />;
                 },
               }}
             >

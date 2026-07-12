@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { ContextUsage, ModelChoice, ThinkingLevel } from "@pi-outpost/shared";
 import { THINKING_LEVELS } from "@pi-outpost/shared";
 
@@ -56,6 +57,81 @@ function ContextRing({ usage }: { usage: ContextUsage | null }) {
   );
 }
 
+/**
+ * 🧠 button showing the current level; clicking opens a popover with a slider
+ * scale (off → xhigh). Replaces the old "think: level" dropdown.
+ */
+function ThinkingControl({
+  thinkingLevel,
+  isStreaming,
+  onSetThinking,
+}: Pick<ModelBarProps, "thinkingLevel" | "isStreaming" | "onSetThinking">) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const active = thinkingLevel !== "off";
+  const index = Math.max(0, THINKING_LEVELS.indexOf(thinkingLevel as ThinkingLevel));
+
+  useEffect(() => {
+    if (!open) return;
+    function onMouseDown(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        disabled={isStreaming}
+        title="thinking level"
+        aria-haspopup="true"
+        aria-expanded={open}
+        className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-xs disabled:opacity-50 ${
+          active
+            ? "border-amber-300 text-amber-700 hover:border-amber-400 dark:border-amber-900 dark:text-amber-400 dark:hover:border-amber-700"
+            : "border-zinc-300 text-zinc-500 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+        }`}
+      >
+        <span aria-hidden className={`text-sm leading-none ${active ? "" : "opacity-40 grayscale"}`}>🧠</span>
+        {thinkingLevel}
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 z-20 mb-1 w-48 rounded-lg border border-zinc-200 bg-white p-3 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+          <div className="mb-1 flex items-baseline justify-between text-xs">
+            <span className="text-zinc-500 dark:text-zinc-400">thinking</span>
+            <span className="font-mono text-zinc-700 dark:text-zinc-200">{thinkingLevel}</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={THINKING_LEVELS.length - 1}
+            step={1}
+            value={index}
+            onChange={(e) => onSetThinking(THINKING_LEVELS[Number(e.target.value)])}
+            aria-label="Thinking level"
+            aria-valuetext={thinkingLevel}
+            className="w-full accent-amber-500"
+          />
+          <div className="mt-0.5 flex justify-between font-mono text-[9px] text-zinc-400 dark:text-zinc-600">
+            <span>{THINKING_LEVELS[0]}</span>
+            <span>{THINKING_LEVELS[THINKING_LEVELS.length - 1]}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ModelBar(props: ModelBarProps) {
   const { model, models, thinkingLevel, modelSupportsReasoning, isStreaming, contextUsage, isCompacting } = props;
 
@@ -79,19 +155,11 @@ export function ModelBar(props: ModelBarProps) {
       </select>
 
       {modelSupportsReasoning && (
-        <select
-          value={thinkingLevel}
-          onChange={(e) => props.onSetThinking(e.target.value as ThinkingLevel)}
-          disabled={isStreaming}
-          className="rounded-md border border-zinc-300 bg-white px-2 py-1 font-mono text-xs text-zinc-700 outline-none hover:border-zinc-400 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600"
-          title="thinking level"
-        >
-          {THINKING_LEVELS.map((level) => (
-            <option key={level} value={level}>
-              think: {level}
-            </option>
-          ))}
-        </select>
+        <ThinkingControl
+          thinkingLevel={thinkingLevel}
+          isStreaming={isStreaming}
+          onSetThinking={props.onSetThinking}
+        />
       )}
 
       <button

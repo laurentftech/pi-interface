@@ -16,6 +16,7 @@ export default defineConfig({
       },
       '/branding': `http://127.0.0.1:${port}`,
       '/health': `http://127.0.0.1:${port}`,
+      '/files': `http://127.0.0.1:${port}`,
     },
   },
 })

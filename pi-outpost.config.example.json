@@ -11,6 +11,7 @@
   "extensionPaths": [],
   "noSkills": true,
   "noPromptTemplates": true,
+  "webContext": true,
   "allowedModels": [{ "provider": "anthropic", "id": "claude-sonnet-5" }],
   "appendSystemPrompt": ["Only discuss topics related to this project."],
   "server": {

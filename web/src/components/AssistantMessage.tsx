@@ -1,14 +1,25 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { ChatItem } from "@pi-outpost/shared";
 import { normalizeMathDelimiters } from "../markdownMath";
+import { isExternalRef, rawFileUrl, resolveRelativeHref } from "../workspacePath";
 import { CopyButton } from "./CopyButton";
 import { Mermaid } from "./Mermaid";
 
 type AssistantItem = Extract<ChatItem, { kind: "assistant" }>;
+
+interface AssistantMessageProps {
+  item: AssistantItem;
+  /** Backend origin for the embed widget ("" = same-origin). */
+  serverUrl?: string;
+  /** Auth token appended to /files/raw image URLs (img can't send headers). */
+  token?: string | null;
+  /** Opens a workspace-relative path in the file viewer. */
+  onOpenFile?: (path: string) => void;
+}
 
 function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -52,12 +63,56 @@ function PreBlock(props: React.HTMLAttributes<HTMLPreElement>) {
   return <pre {...rest}>{children}</pre>;
 }
 
-export function AssistantMessage({ item }: { item: AssistantItem }) {
+export function AssistantMessage({ item, serverUrl = "", token = null, onOpenFile }: AssistantMessageProps) {
   const fullText = item.blocks
     .filter((b) => b.type === "text")
     .map((b) => b.text)
     .join("\n\n")
     .trim();
+
+  // Ref keeps the memoized components below stable even when the parent passes
+  // a fresh onOpenFile closure each render — an identity change would remount
+  // every <img> in the conversation on every streamed token (and refetch, the
+  // endpoint is no-store).
+  const onOpenFileRef = useRef(onOpenFile);
+  onOpenFileRef.current = onOpenFile;
+
+  // Workspace-relative references in replies: images load through the raw-bytes
+  // endpoint, links open the file viewer. External URLs pass through untouched.
+  const components = useMemo(() => {
+    function MarkdownImg({ src, alt, ...rest }: React.ImgHTMLAttributes<HTMLImageElement>) {
+      const resolved =
+        typeof src === "string" && src !== "" && !isExternalRef(src)
+          ? rawFileUrl(serverUrl, resolveRelativeHref("", src), token)
+          : src;
+      return <img {...rest} src={resolved} alt={alt ?? ""} loading="lazy" className="max-h-96 max-w-full rounded-lg object-contain" />;
+    }
+
+    function MarkdownLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+      if (typeof href === "string" && href !== "" && !isExternalRef(href) && onOpenFileRef.current) {
+        const path = resolveRelativeHref("", href);
+        return (
+          <a
+            {...rest}
+            href={href}
+            onClick={(event) => {
+              event.preventDefault();
+              onOpenFileRef.current?.(path);
+            }}
+          >
+            {children}
+          </a>
+        );
+      }
+      return (
+        <a {...rest} href={href} target="_blank" rel="noreferrer">
+          {children}
+        </a>
+      );
+    }
+
+    return { pre: PreBlock, img: MarkdownImg, a: MarkdownLink };
+  }, [serverUrl, token]);
 
   return (
     <div className="group max-w-none">
@@ -74,7 +129,7 @@ export function AssistantMessage({ item }: { item: AssistantItem }) {
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[rehypeKatex]}
-              components={{ pre: PreBlock }}
+              components={components}
             >
               {normalizeMathDelimiters(block.text)}
             </ReactMarkdown>

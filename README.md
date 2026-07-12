@@ -83,6 +83,7 @@ Optional. Create `pi-outpost.config.json` next to where you launch the server (o
 | `allowedModels` | Restrict the model switcher to these `{ "provider", "id" }` pairs. Without it, every built-in model whose provider has configured auth is listed — often more variants than a given deployment (e.g. an air-gapped internal endpoint) actually serves |
 | `systemPrompt` / `systemPromptFile` | Replace pi's built-in system prompt entirely (mutually exclusive; `systemPromptFile` is a path to a text file). Project context files, skills, and `appendSystemPrompt` are still layered on top |
 | `appendSystemPrompt` | Array of extra paragraphs appended after the (built-in or custom) system prompt |
+| `webContext` | Inject a short web-UI context block into the system prompt so the agent knows its replies render in this UI (markdown, inline images, file links). Default `true`; set `false` for tightly curated prompts |
 | `server.port` | Port to listen on (default `3141`, or the `PORT` env var if set) |
 | `server.host` | Host to bind to (default `127.0.0.1` — only change this if you understand the security note above) |
 | `server.allowedOrigins` | Extra exact Origins accepted on the WebSocket (embed the UI as a tab in another app) |

@@ -36,7 +36,7 @@ import {
 import path from "node:path";
 import { loadConfig } from "./config.ts";
 import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
-import { FileBrowserError, listDirectory, readFileForPreview, writeFileFromBrowser, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
+import { FileBrowserError, listDirectory, readFileForPreview, readFileRaw, writeFileFromBrowser, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
 import { GitError, gitHeadContent, gitLog, gitShow, gitStatus, probeGit } from "./git.ts";
 import { createSandboxedTools, isWithin, realResolve } from "./sandbox.ts";
 import { seaExtensionFactories } from "./sea-extensions.ts";
@@ -136,6 +136,89 @@ app.get("/health", () => {
   return config.token !== undefined ? { ok: health.ok } : health;
 });
 
+/** Only these render inline; SVG additionally gets a scripts-off CSP below. */
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif",
+};
+
+/**
+ * DNS-rebinding guard for token-less servers: a malicious page can rebind its
+ * hostname to 127.0.0.1 and read workspace files through /files/raw — the
+ * browser then sends the attacker's Host header, which this rejects. With a
+ * token configured the auth check already stops that attacker, and strict Host
+ * matching would break reverse-proxy setups, so the guard only arms without one.
+ */
+function hostAllowed(hostHeader: string | undefined): boolean {
+  if (config.token !== undefined) return true;
+  if (hostHeader === undefined) return false;
+  let hostname: string;
+  try {
+    hostname = new URL(`http://${hostHeader}`).hostname;
+  } catch {
+    return false;
+  }
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]") return true;
+  if (hostname === HOST) return true;
+  return config.allowedOrigins.some((origin) => {
+    try {
+      return new URL(origin).hostname === hostname;
+    } catch {
+      return false;
+    }
+  });
+}
+
+// Raw bytes for workspace files referenced in assistant messages (inline
+// images). `<img>` cannot send headers, so the token rides the query string —
+// same trade-off as the WebSocket.
+app.get("/files/raw", async (req, reply) => {
+  const query = req.query as Record<string, unknown>;
+  if (!hostAllowed(req.headers.host)) {
+    console.warn(`[server] rejected /files/raw request with foreign host ${req.headers.host} from ${req.ip}`);
+    return reply.code(403).send({ error: "forbidden" });
+  }
+  const auth = req.headers.authorization;
+  const bearer = auth?.startsWith("Bearer ") ? auth.slice("Bearer ".length) : undefined;
+  const queryToken = typeof query.token === "string" ? query.token : undefined;
+  if (!tokenValid(bearer) && !tokenValid(queryToken)) {
+    console.warn(`[server] rejected /files/raw request with bad or missing token from ${req.ip}`);
+    return reply.code(401).send({ error: "unauthorized" });
+  }
+  const relPath = typeof query.path === "string" ? query.path : undefined;
+  if (!relPath) return reply.code(400).send({ error: "missing path" });
+  try {
+    const bytes = await readFileRaw(BROWSER_ROOT, relPath);
+    reply.header("X-Content-Type-Options", "nosniff");
+    // Workspace content may be stale seconds later (agent regenerates a plot)
+    reply.header("Cache-Control", "no-store");
+    const contentType = IMAGE_CONTENT_TYPES[path.extname(relPath).toLowerCase()];
+    if (contentType !== undefined) {
+      if (contentType === "image/svg+xml") {
+        // <img> rasterizes SVG without scripts, but a direct navigation to this
+        // URL would run them on our origin — the CSP closes that hole
+        reply.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'");
+      }
+      return reply.header("Content-Type", contentType).send(bytes);
+    }
+    // Anything else (HTML above all) must never execute or render on this origin
+    return reply
+      .header("Content-Type", "application/octet-stream")
+      .header("Content-Disposition", "attachment")
+      .send(bytes);
+  } catch (error) {
+    if (error instanceof FileBrowserError) {
+      return reply.code(error.reason === "too-large" ? 413 : 404).send({ error: error.reason });
+    }
+    throw error;
+  }
+});
+
 // Serve the built web UI as a single deployable unit when present (`npm run build
 // --workspace web` first) — /branding, /ws, /health above take priority over it
 // regardless of registration order, since Fastify's router favors exact routes over
@@ -156,11 +239,29 @@ console.log(`[server] http://${HOST}:${PORT}/`);
 
 // --- Agent session runtime ---------------------------------------------------
 
+/**
+ * Prepended to the operator's appendSystemPrompt entries (unless webContext is
+ * disabled) so the model knows its output renders in this web UI rather than a
+ * terminal. Describes rendering capabilities only — grants no permissions.
+ */
+const WEB_UI_CONTEXT = [
+  "You are running inside pi-outpost, a web chat UI — not a terminal.",
+  "Replies render as markdown with syntax-highlighted code, LaTeX math and mermaid diagrams.",
+  "When a user message contains @some/path, the user picked that file or directory in the UI's file browser: it exists, relative to your working directory. Use it directly — never search for it.",
+  "Workspace files can be referenced with relative markdown links, e.g. [report](./report.md) — clicking one opens the file in the UI's viewer/editor.",
+  "Images in the workspace (including ones you create) display inline in the conversation when referenced with a relative path: ![plot](./plot.png). Prefer showing an image that way over describing it.",
+  "Avoid terminal-only affordances: no 'open this file in your editor' or 'run this command to view' phrasing, no ASCII art where a mermaid diagram or an image file works better.",
+].join("\n");
+
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd,
   sessionManager,
   sessionStartEvent,
 }) => {
+  const appendSystemPrompt = [
+    ...(config.webContext ? [WEB_UI_CONTEXT] : []),
+    ...config.appendSystemPrompt,
+  ];
   const services = await createAgentSessionServices({
     cwd,
     agentDir: config.agentDir,
@@ -172,7 +273,7 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
       ...(config.noSkills ? { noSkills: true } : {}),
       ...(config.noPromptTemplates ? { noPromptTemplates: true } : {}),
       ...(config.systemPrompt !== undefined ? { systemPrompt: config.systemPrompt } : {}),
-      ...(config.appendSystemPrompt.length > 0 ? { appendSystemPrompt: config.appendSystemPrompt } : {}),
+      ...(appendSystemPrompt.length > 0 ? { appendSystemPrompt } : {}),
       ...(seaExtensionFactories.length > 0 ? { extensionFactories: seaExtensionFactories } : {}),
     },
   });

@@ -638,6 +638,8 @@ export function useAgent(serverUrl = "", explicitToken?: string, embedded = fals
 
   return {
     state,
+    /** Current auth token (null when none) — for building /files/raw image URLs. */
+    authToken: tokenRef.current,
     /** TokenGate submission: persist the token and reconnect with it. */
     submitToken: (token: string) => {
       storeToken(token);

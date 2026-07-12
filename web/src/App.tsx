@@ -42,6 +42,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
   const accentTarget = rootElement ?? document.documentElement;
   const {
     state,
+    authToken,
     submitToken,
     prompt,
     abort,
@@ -74,6 +75,25 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
   const [viewerDirty, setViewerDirty] = useState(false);
   // Badge click in the tree opens the file straight onto its uncommitted diff
   const [diffOnOpen, setDiffOnOpen] = useState(false);
+  // Tool-noise filter: skip tool cards in the list (long sessions drown in them).
+  // Cards aren't CSS-hidden — hidden ones must not cost layout.
+  const [hideTools, setHideTools] = useState(() => {
+    try {
+      return localStorage.getItem("pi-outpost:hide-tools") === "1";
+    } catch {
+      return false;
+    }
+  });
+  function toggleHideTools() {
+    setHideTools((current) => {
+      try {
+        localStorage.setItem("pi-outpost:hide-tools", current ? "0" : "1");
+      } catch {
+        // Storage unavailable — the toggle still works for this session
+      }
+      return !current;
+    });
+  }
   const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
   // Counter, not boolean: dragenter/dragleave fire for every child crossed
   const [dragDepth, setDragDepth] = useState(0);
@@ -186,7 +206,9 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
             showThemeToggle={state.branding.allowThemeToggle !== false}
             statuses={state.statuses}
             sidebarOpen={sidebarOpen}
+            hideTools={hideTools}
             onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+            onToggleHideTools={toggleHideTools}
             onToggleTheme={toggleTheme}
             onNewSession={newSession}
             onSwitchSession={switchSession}
@@ -219,6 +241,8 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
               onClose={closeFilePreview}
               onReload={readFile}
               onSave={writeFile}
+              serverUrl={serverUrl}
+              token={authToken}
             />
           )}
           {state.gitShow && <GitCommitView show={state.gitShow} onClose={clearGitShow} />}
@@ -257,6 +281,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
                   );
                 }
                 if (item.kind === "tool") {
+                  if (hideTools) return null;
                   return <ToolCard key={item.toolCallId ? `${state.sessionId}:${item.toolCallId}` : key} item={item} />;
                 }
                 if (item.kind === "custom") {
@@ -264,7 +289,18 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
                 }
                 // Tool-call-only messages produce empty assistant items — skip them
                 if (item.blocks.length === 0 && !item.errorMessage) return null;
-                return <AssistantMessage key={key} item={item} />;
+                return (
+                  <AssistantMessage
+                    key={key}
+                    item={item}
+                    serverUrl={serverUrl}
+                    token={authToken}
+                    onOpenFile={(path) => {
+                      setDiffOnOpen(false);
+                      readFile(path);
+                    }}
+                  />
+                );
               })}
 
               {(state.queue.steering.length > 0 || state.queue.followUp.length > 0) && (

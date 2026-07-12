@@ -123,6 +123,28 @@ export async function readFileForPreview(
 }
 
 /**
+ * Raw bytes for the HTTP `/files/raw` endpoint (inline images in the chat).
+ * Same confinement and size cap as previews; binary is fine here — deciding
+ * what's safe to *serve* (content type, disposition) is the route's job.
+ */
+export async function readFileRaw(root: string, relPath: string): Promise<Buffer> {
+  const resolved = await resolveConfined(root, relPath);
+  let stat: Awaited<ReturnType<typeof fs.stat>>;
+  try {
+    stat = await fs.stat(resolved);
+  } catch {
+    throw new FileBrowserError("not-found", `"${relPath}" does not exist`);
+  }
+  if (!stat.isFile()) {
+    throw new FileBrowserError("not-found", `"${relPath}" is not a file`);
+  }
+  if (stat.size > MAX_PREVIEW_BYTES) {
+    throw new FileBrowserError("too-large", `File is larger than the 1 MB limit`);
+  }
+  return fs.readFile(resolved);
+}
+
+/**
  * Write a file back from the browser's editor. Permission mirrors the agent's own
  * write tool: without a sandbox anything under the browser root is writable; with
  * one, writes need `allowWrite` and must land inside the writable zone.

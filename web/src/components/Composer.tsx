@@ -105,6 +105,7 @@ export function Composer({
   const [dismissed, setDismissed] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingCursorRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -363,18 +364,71 @@ export function Composer({
           <button
             type="button"
             onClick={onAbort}
-            className="rounded-lg bg-red-100 px-3 py-1.5 text-sm text-red-700 hover:bg-red-200 dark:bg-red-900/60 dark:text-red-200 dark:hover:bg-red-900"
+            title="stop"
+            aria-label="Stop the agent"
+            className="rounded-lg bg-red-100 p-2 text-red-700 hover:bg-red-200 dark:bg-red-900/60 dark:text-red-200 dark:hover:bg-red-900"
           >
-            stop
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className="h-4 w-4">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
           </button>
         )}
         <button
           type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!connected}
+          title="attach files"
+          aria-label="Attach files"
+          className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 disabled:opacity-30 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden className="h-4 w-4">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"
+            />
+          </svg>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files?.length) onAttach(Array.from(e.target.files));
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
           onClick={submit}
           disabled={!connected || (!text.trim() && attachments.length === 0)}
-          className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-30 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+          title={isStreaming ? "steer" : "send"}
+          aria-label={isStreaming ? "Steer the agent" : "Send message"}
+          className="rounded-lg bg-zinc-900 p-2 text-zinc-100 hover:bg-zinc-800 disabled:opacity-30 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
         >
-          {isStreaming ? "steer" : "send"}
+          {isStreaming ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden className="h-4 w-4">
+              <circle cx="6" cy="19" r="3" />
+              <path strokeLinecap="round" d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" />
+              <circle cx="18" cy="5" r="3" />
+            </svg>
+          ) : (
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.8}
+              aria-hidden
+              className="h-4 w-4"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 12 3.27 3.13c6.6 1.9 12.83 4.9 18.43 8.87-5.6 3.97-11.83 6.97-18.43 8.87L6 12Zm0 0h7.5"
+              />
+            </svg>
+          )}
         </button>
       </div>
     </div>

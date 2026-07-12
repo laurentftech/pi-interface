@@ -16,10 +16,13 @@ interface HeaderProps {
   /** Extension setStatus() key/text pairs — see extensions.md#custom-ui. */
   statuses: Record<string, string>;
   sidebarOpen: boolean;
+  /** Tool-noise filter: tool cards are hidden from the conversation. */
+  hideTools: boolean;
   gitAvailable: boolean;
   gitStatus: GitStatusState | null;
   gitLog: GitLogEntry[] | null;
   onToggleSidebar: () => void;
+  onToggleHideTools: () => void;
   onToggleTheme: () => void;
   onNewSession: () => void;
   onSwitchSession: (path: string) => void;
@@ -177,6 +180,19 @@ export function Header(props: HeaderProps) {
       ))}
 
       <div className="ml-auto flex items-center gap-2">
+        <button
+          type="button"
+          onClick={props.onToggleHideTools}
+          title={props.hideTools ? "Show tool cards in the conversation" : "Hide tool cards (long sessions read better without them)"}
+          aria-pressed={props.hideTools}
+          className={`rounded-md border px-2 py-1 text-xs ${
+            props.hideTools
+              ? "border-zinc-400 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200"
+              : "border-zinc-300 text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-200"
+          }`}
+        >
+          ⚒ tools
+        </button>
         {props.showThemeToggle && <ThemeToggle theme={props.theme} onToggle={props.onToggleTheme} />}
         <button
           type="button"

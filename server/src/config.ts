@@ -85,6 +85,13 @@ export interface AppConfig {
   systemPrompt?: string;
   /** Extra text appended after the (built-in or custom) system prompt, one entry per paragraph. */
   appendSystemPrompt: string[];
+  /**
+   * Inject a web-UI context block into the system prompt (before
+   * appendSystemPrompt entries) so the agent knows its output renders in this
+   * web UI — markdown/math/mermaid, inline images, viewer links. Set false for
+   * deployments with a tightly curated prompt.
+   */
+  webContext: boolean;
   port: number;
   host: string;
   /** Extra exact Origins allowed on the WebSocket (for embedding in another app). */
@@ -157,6 +164,7 @@ export function loadConfig(baseCwd: string): AppConfig {
     noSkills: false,
     noPromptTemplates: false,
     appendSystemPrompt: [],
+    webContext: true,
     port: Number(process.env.PORT ?? 3141),
     host: "127.0.0.1",
     allowedOrigins: [],
@@ -232,6 +240,7 @@ export function loadConfig(baseCwd: string): AppConfig {
     config.systemPrompt = systemPrompt;
   }
   config.appendSystemPrompt = optionalStringArray(raw, "appendSystemPrompt") ?? [];
+  config.webContext = optionalBoolean(raw, "webContext", true);
 
   if (raw.server !== undefined) {
     const server = asObject(raw.server, "server");
