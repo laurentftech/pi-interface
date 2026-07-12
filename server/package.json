@@ -7,7 +7,9 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
-    "build:sea": "node scripts/build-sea.mjs"
+    "build:sea": "node scripts/build-sea.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:live": "node --test --test-timeout=180000 test/live/*.test.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.6",

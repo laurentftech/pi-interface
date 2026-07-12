@@ -50,6 +50,16 @@ npm run dev
 
 The agent works in the directory the server is started from; override with `PI_CWD=/path/to/project`.
 
+### Tests
+
+```bash
+npm run test --workspace server        # integration tests: no model auth needed, no tokens spent
+npm run test:live --workspace server   # drives real agent turns (needs model auth, costs tokens)
+```
+
+Each test boots a real server against a throwaway workspace (isolated `agentDir` — your sessions and
+extensions are never touched) and talks to it over HTTP/WebSocket. See `server/test/README.md`.
+
 > **Security note:** the server binds to `127.0.0.1` and validates the WebSocket `Origin` header. The agent has bash/edit/write tools — never expose this server on a network without the sandbox config below **and** an auth token: set `server.token` (or the `PI_OUTPOST_TOKEN` env variable, which wins) to a long random secret, e.g. `openssl rand -hex 32`. Clients authenticate by opening `http://host:3141/?token=<secret>` once (stored locally, stripped from the URL) or via the embed widget's `token` option. Use a reverse proxy or Tailscale for transport encryption.
 
 ## Production (single process)
