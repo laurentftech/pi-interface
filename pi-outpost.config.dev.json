@@ -1,0 +1,10 @@
+{
+  "cwd": ".",
+  "server": {
+    "port": 3141,
+    "host": "127.0.0.1"
+  },
+  "branding": {
+    "title": "π dev"
+  }
+}

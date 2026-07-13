@@ -1,0 +1,69 @@
+name: Release
+
+# Publishes on a version tag: `git tag v0.1.0 && git push origin v0.1.0`.
+# The tag is the trigger *and* the version claim — the job refuses to publish if it
+# disagrees with what the packages say about themselves.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  # Signed provenance ("built from this commit, by this workflow") — npm mints it
+  # from GitHub's OIDC token, so publishing needs it even with an NPM_TOKEN.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      # A tag claims a version; at least one package must actually be at it, and none
+      # may disagree with it. (The two packages version independently — a cli-only
+      # release leaves embed behind, and must not force a no-op republish of it.)
+      - name: Tag must match the packages it releases
+        id: plan
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          publish=""
+          for pkg in cli embed; do
+            version=$(node -p "require('./$pkg/package.json').version")
+            if [ "$version" = "$tag" ]; then
+              name=$(node -p "require('./$pkg/package.json').name")
+              # Idempotent: a re-run after a half-published tag skips what already landed
+              if npm view "$name@$tag" version > /dev/null 2>&1; then
+                echo "$name@$tag is already on npm — skipping"
+              else
+                publish="$publish $pkg"
+              fi
+            fi
+          done
+          if [ -z "$publish" ]; then
+            echo "::error::no package is at version $tag (or all are already published)"
+            exit 1
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      # The same gates as CI — a tag must not be a way around them.
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test --workspace server
+      - run: npm run build
+
+      # prepack rebuilds each package from this clean checkout, so what ships is what
+      # was just tested — never a stale dist/ from someone's machine.
+      - name: Publish
+        run: |
+          for pkg in ${{ steps.plan.outputs.publish }}; do
+            npm publish --workspace "$pkg" --provenance
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

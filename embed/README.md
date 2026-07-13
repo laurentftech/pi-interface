@@ -4,7 +4,14 @@ Mount [pi-outpost](https://github.com/laurentftech/pi-outpost) — a web chat UI
 
 The widget renders into a **Shadow DOM**, fully isolated from the host app's CSS in both directions: Tailwind's reset never touches the host page, and the host page's styles never bleed into the widget. React is a peer dependency (supplied by the host); everything else — Tailwind, markdown, mermaid, highlight.js, the wire protocol — is compiled into the package.
 
-It talks to a pi-outpost server over WebSocket. You need one running: see the [main README](https://github.com/laurentftech/pi-outpost#readme).
+It talks to a pi-outpost server over WebSocket, so you need one running:
+
+```sh
+npx pi-outpost init   # writes a starter config
+npx pi-outpost        # http://127.0.0.1:3141/
+```
+
+See the [main README](https://github.com/laurentftech/pi-outpost#readme) for configuring it.
 
 ## Install
 

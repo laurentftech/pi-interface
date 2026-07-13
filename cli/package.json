@@ -1,0 +1,42 @@
+{
+  "name": "pi-outpost",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A web chat UI for the pi coding agent — run it with npx, no clone, no build.",
+  "license": "MIT",
+  "author": "Laurent Francoise",
+  "homepage": "https://github.com/laurentftech/pi-outpost#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laurentftech/pi-outpost.git",
+    "directory": "cli"
+  },
+  "bugs": {
+    "url": "https://github.com/laurentftech/pi-outpost/issues"
+  },
+  "keywords": [
+    "pi",
+    "coding-agent",
+    "ai",
+    "chat",
+    "web-ui",
+    "cli"
+  ],
+  "bin": {
+    "pi-outpost": "./dist/pi-outpost.mjs"
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}

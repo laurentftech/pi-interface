@@ -40,6 +40,17 @@ A Node server embeds a pi `AgentSession` and bridges it to a React chat UI over 
 
 Requirements: Node ≥ 20, and [pi](https://github.com/earendil-works/pi) configured (`~/.pi/agent/auth.json` or provider env vars like `ANTHROPIC_API_KEY`).
 
+### Run it
+
+```bash
+npx pi-outpost init   # writes a starter pi-outpost.config.json here
+npx pi-outpost        # serves the UI on http://127.0.0.1:3141/
+```
+
+pi-outpost never starts without a configuration file: the agent's working directory, its tools and its sandbox are decided there, and guessing them from whatever directory you happen to be standing in is not a decision anyone wants made for them. `init` writes the safe version of that file (read-only, no bash) for you to open up as needed.
+
+### Develop against the repository
+
 ```bash
 npm install
 npm run dev
@@ -48,7 +59,7 @@ npm run dev
 - Web UI: http://localhost:5173 (Vite dev server, proxies `/ws`, `/branding`, `/health` to the agent server)
 - Agent server: ws://127.0.0.1:3141/ws
 
-The agent works in the directory the server is started from; override with `PI_CWD=/path/to/project`.
+`npm run dev` passes the repository's committed [`pi-outpost.config.dev.json`](pi-outpost.config.dev.json) — the same code path, the same rule, no special case for developers.
 
 ### Tests
 
@@ -60,7 +71,7 @@ npm run test:live --workspace server   # drives real agent turns (needs model au
 Each test boots a real server against a throwaway workspace (isolated `agentDir` — your sessions and
 extensions are never touched) and talks to it over HTTP/WebSocket. See `server/test/README.md`.
 
-> **Security note:** the server binds to `127.0.0.1` and validates the WebSocket `Origin` header. The agent has bash/edit/write tools — never expose this server on a network without the sandbox config below **and** an auth token: set `server.token` (or the `PI_OUTPOST_TOKEN` env variable, which wins) to a long random secret, e.g. `openssl rand -hex 32`. Clients authenticate by opening `http://host:3141/?token=<secret>` once (stored locally, stripped from the URL) or via the embed widget's `token` option. Use a reverse proxy or Tailscale for transport encryption.
+> **Security note:** the server binds to `127.0.0.1` and validates the WebSocket `Origin` header. The agent has bash/edit/write tools — never expose this server on a network without the sandbox config below **and** an auth token: set `server.token` (or the `PI_OUTPOST_TOKEN` env variable, which wins) to a long random secret, e.g. `openssl rand -hex 32`. Binding off loopback without one is now **refused**, not merely discouraged: the WebSocket accepts connections with no `Origin` header (a local process already has shell access, so the check would be theatre), and with no token every request is valid — so `--host 0.0.0.0` alone would hand the agent to anything that can route to the host. Clients authenticate by opening `http://host:3141/?token=<secret>` once (stored locally, stripped from the URL) or via the embed widget's `token` option. Use a reverse proxy or Tailscale for transport encryption.
 
 ## Production (single process)
 
@@ -70,13 +81,57 @@ npm run start
 
 Builds the web UI once (`web/dist`) and starts **one** Node process that serves the UI, `/ws`, `/branding`, and `/health` together on `server.port` (default `3141`) — nothing else to run or keep track of. Point a process manager (systemd, pm2, Docker `CMD`, …) at this one command; there's no separate dev server to start or stop.
 
+Unlike `npm run dev`, this reads *your* configuration (`./pi-outpost.config.json`, or any of the locations below) — not the repository's dev config. With none, it refuses to start and says so.
+
 Rebuild (`npm run build --workspace web`) and restart after any UI change — this mode has no hot reload, unlike `npm run dev` above.
 
 Need to distribute a version that doesn't require Node.js installed at all (e.g. a Windows `.exe` for non-technical users)? See [`docs/sea-packaging.md`](docs/sea-packaging.md).
 
+## Command line
+
+```
+pi-outpost [options]          start the server
+pi-outpost init [options]     write a starter configuration file
+pi-outpost config [options]   print the configuration that would be used, and where it came from
+```
+
+> **Upgrading from a pre-`0.1.0` clone?** Three behaviours changed. The server now **refuses to start without a configuration file** (it used to fall back to a plain local pi: your launch directory as workspace, full toolset, bash enabled) — run `pi-outpost init`. `PI_OUTPOST_PORT`/`PORT` now **override** `server.port` instead of being overridden by it, in line with `PI_OUTPOST_TOKEN`, which always won. And `PI_CWD` is now `PI_OUTPOST_CWD`.
+
+| Flag | Effect |
+|------|--------|
+| `--config <path>` | Configuration file to use |
+| `--profile <name>` | Use `<user config dir>/profiles/<name>.json` |
+| `--cwd <dir>` | Directory the agent works in |
+| `--agent-dir <dir>` | pi config/session store (default `~/.pi/agent`) |
+| `--port <n>` / `--host <addr>` | Where to listen (default `127.0.0.1:3141`) |
+| `-h, --help` / `-v, --version` | |
+| `init --global` | Write to the user config directory instead of `./` |
+| `init --force` | Overwrite an existing file |
+
+There is deliberately **no `--token` flag**: a secret on the command line is readable by anyone who can list processes. Use `PI_OUTPOST_TOKEN` or the file's `server.token`.
+
 ## Standalone configuration
 
-Optional. Create `pi-outpost.config.json` next to where you launch the server (or point `PI_OUTPOST_CONFIG` at a file). See [`pi-outpost.config.example.json`](pi-outpost.config.example.json). Without it, the server behaves like a plain local pi (user's `~/.pi/agent`, full toolset).
+The server reads the **first** of these that exists, and only that one — configurations are never merged, so the file you are reading is the configuration that is running:
+
+1. `--config <path>`
+2. `--profile <name>` → `<user config dir>/profiles/<name>.json`
+3. `$PI_OUTPOST_CONFIG`
+4. `$PI_OUTPOST_PROFILE` → `<user config dir>/profiles/<name>.json`
+5. `./pi-outpost.config.json` (the directory you launch from)
+6. `<user config dir>/config.json`
+
+`<user config dir>` is `$XDG_CONFIG_HOME/pi-outpost`, or `~/.config/pi-outpost`. A file you name explicitly must exist; the two implicit locations are simply skipped. Found nothing? The server refuses to start and tells you to run `pi-outpost init`.
+
+Not sure which file won, or why a setting has the value it has? **`pi-outpost config`** prints the resolved configuration and the file it came from, without starting anything. Every start also logs the file it loaded and the sandbox it is actually enforcing.
+
+**Profiles.** `--profile work` (or `$PI_OUTPOST_PROFILE`) reads `<user config dir>/profiles/work.json`. A profile is an ordinary config file — same keys, same rules — so `pi-outpost --profile work` from anywhere gives you the setup you configured once.
+
+**Precedence.** For any setting that appears in more than one place: **flag > environment variable > config file > default**. Environment variables: `PI_OUTPOST_PORT` (falling back to `PORT`, which platforms inject), `PI_OUTPOST_HOST`, `PI_OUTPOST_CWD`, `PI_OUTPOST_AGENT_DIR`, `PI_OUTPOST_TOKEN`.
+
+One exception, and it is deliberate: **a sandbox that grants write or bash, but names no `sandbox.root`, refuses a `--cwd`/`PI_OUTPOST_CWD` override.** Such a sandbox falls back to `cwd`, so an inherited variable (a shell profile, a CI job, a compose file) could otherwise turn "write inside my project" into "write inside `/`" without touching the file that granted it. Name the root, and the grant says what it covers. A read-only sandbox has no such hazard and simply follows the workspace.
+
+See [`pi-outpost.config.example.json`](pi-outpost.config.example.json).
 
 | Key | Effect |
 |-----|--------|
@@ -94,7 +149,7 @@ Optional. Create `pi-outpost.config.json` next to where you launch the server (o
 | `systemPrompt` / `systemPromptFile` | Replace pi's built-in system prompt entirely (mutually exclusive; `systemPromptFile` is a path to a text file). Project context files, skills, and `appendSystemPrompt` are still layered on top |
 | `appendSystemPrompt` | Array of extra paragraphs appended after the (built-in or custom) system prompt |
 | `webContext` | Inject a short web-UI context block into the system prompt so the agent knows its replies render in this UI (markdown, inline images, file links). Default `true`; set `false` for tightly curated prompts |
-| `server.port` | Port to listen on (default `3141`, or the `PORT` env var if set) |
+| `server.port` | Port to listen on (default `3141`). `--port` and `PI_OUTPOST_PORT`/`PORT` override it |
 | `server.host` | Host to bind to (default `127.0.0.1` — only change this if you understand the security note above) |
 | `server.allowedOrigins` | Extra exact Origins accepted on the WebSocket (embed the UI as a tab in another app) |
 | `server.token` | Shared secret required on the WebSocket and `/branding` when set (`PI_OUTPOST_TOKEN` env overrides). Mandatory in practice when `server.host` is not loopback |

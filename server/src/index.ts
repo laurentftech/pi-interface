@@ -36,7 +36,8 @@ import {
   type WireImage,
 } from "@pi-outpost/shared";
 import path from "node:path";
-import { loadConfig } from "./config.ts";
+import { helpText, parseCli, runInit } from "./cli.ts";
+import { loadConfig, NoConfigError } from "./config.ts";
 import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
 import { FileBrowserError, listDirectory, readFileForPreview, readFileRaw, writeFileFromBrowser, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
 import { GitError, gitHeadContent, gitLog, gitShow, gitStatus, probeGit } from "./git.ts";
@@ -53,9 +54,78 @@ import {
 } from "./sessions.ts";
 import { seaExtensionFactories } from "./sea-extensions.ts";
 
+// Replaced at bundle time; `typeof` on an undeclared name is safe, so a source run says "dev".
+declare const __PI_OUTPOST_VERSION__: string;
+const VERSION = typeof __PI_OUTPOST_VERSION__ === "string" ? __PI_OUTPOST_VERSION__ : "dev";
+
 // npm workspace scripts run with cwd=server/ — INIT_CWD is where `npm run` was invoked
-const BASE_CWD = process.env.PI_CWD ?? process.env.INIT_CWD ?? process.cwd();
-const config = loadConfig(BASE_CWD);
+const LAUNCH_DIR = process.env.INIT_CWD ?? process.cwd();
+
+/** `[config] …` messages already carry their own tag — don't stack a second one. */
+function complain(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(message.startsWith("[") ? message : `[pi] ${message}`);
+}
+
+const cli = (() => {
+  try {
+    return parseCli(process.argv.slice(2));
+  } catch (error) {
+    complain(error);
+    process.exit(2);
+  }
+})();
+
+if (cli.command === "help") {
+  console.log(helpText());
+  process.exit(0);
+}
+if (cli.command === "version") {
+  console.log(VERSION);
+  process.exit(0);
+}
+if (cli.command === "init") {
+  try {
+    // The same directory discovery will search — writing where a later start won't
+    // look would be a cruel joke under any `npm run` wrapper.
+    const written = runInit(LAUNCH_DIR, cli.init);
+    console.log(`[pi] wrote ${written}\n[pi] edit it, then run: pi-outpost`);
+    process.exit(0);
+  } catch (error) {
+    complain(error);
+    process.exit(1);
+  }
+}
+
+const config = (() => {
+  try {
+    return loadConfig(LAUNCH_DIR, cli.flags);
+  } catch (error) {
+    if (error instanceof NoConfigError) {
+      console.error(
+        [
+          "[pi] no configuration file found. Looked in:",
+          ...error.searched.map((candidate) => `      ${candidate}`),
+          "",
+          "      Create one with:  pi-outpost init          (here)",
+          "                        pi-outpost init --global (for every directory)",
+          "      Or point at one:  pi-outpost --config <path>",
+        ].join("\n"),
+      );
+      process.exit(1);
+    }
+    complain(error);
+    process.exit(1);
+  }
+})();
+// Answers "which of the four files am I actually running, and who won each setting"
+// without starting anything. The token is the one thing never echoed back.
+if (cli.command === "config") {
+  const { token, ...rest } = config;
+  console.log(JSON.stringify({ ...rest, token: token ? "<set>" : undefined }, null, 2));
+  process.exit(0);
+}
+
 const PORT = config.port;
 const HOST = config.host;
 const AGENT_CWD = config.cwd;
@@ -236,12 +306,35 @@ app.get("/files/raw", async (req, reply) => {
 // regardless of registration order, since Fastify's router favors exact routes over
 // this plugin's wildcard. Skipped silently in dev, where `npm run dev:web` (Vite,
 // with HMR) serves the UI instead.
-const WEB_DIST = path.resolve(import.meta.dirname, "../../web/dist");
-const webDistExists = await fs
-  .stat(WEB_DIST)
-  .then((s) => s.isDirectory())
-  .catch(() => false);
-if (webDistExists) {
+// Three layouts must resolve: the published npm package (the UI ships beside the
+// bundle as dist/web/), the clone, and the SEA bundle — which mirrors the clone's
+// depth on purpose (see docs/sea-packaging.md).
+//
+// The packaged layout goes first, and not for elegance: from
+// node_modules/pi-outpost/dist/, `../../web/dist` is `node_modules/web/dist` — and
+// `web` is a real name on npm (this repo's own UI workspace is called that). A
+// consumer who happens to depend on some `web` package would otherwise have us
+// serve *its* dist as the chat UI. Each candidate must carry an index.html, so an
+// empty or half-built directory doesn't shadow a good one either.
+const hasIndexHtml = (candidate: string) =>
+  fs
+    .stat(path.join(candidate, "index.html"))
+    .then((s) => s.isFile())
+    .catch(() => false);
+const webDistCandidates = process.env.PI_OUTPOST_WEB_DIST
+  ? [path.resolve(process.env.PI_OUTPOST_WEB_DIST)]
+  : [
+      path.resolve(import.meta.dirname, "./web"),
+      path.resolve(import.meta.dirname, "../../web/dist"),
+    ];
+let WEB_DIST: string | undefined;
+for (const candidate of webDistCandidates) {
+  if (await hasIndexHtml(candidate)) {
+    WEB_DIST = candidate;
+    break;
+  }
+}
+if (WEB_DIST !== undefined) {
   await app.register(fastifyStatic, { root: WEB_DIST });
   console.log(`[server] serving web UI from ${WEB_DIST}`);
 }
