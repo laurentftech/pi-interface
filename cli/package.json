@@ -23,7 +23,7 @@
     "cli"
   ],
   "bin": {
-    "pi-outpost": "./dist/pi-outpost.mjs"
+    "pi-outpost": "dist/pi-outpost.mjs"
   },
   "files": [
     "dist",
@@ -31,6 +31,9 @@
   ],
   "engines": {
     "node": ">=22.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
