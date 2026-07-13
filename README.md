@@ -25,13 +25,16 @@ A Node server embeds a pi `AgentSession` and bridges it to a React chat UI over 
 
 ## Features
 
-- Streaming chat (markdown, thinking blocks, mermaid diagrams)
-- Tool execution cards with live output
+- Streaming chat (markdown, thinking blocks, mermaid diagrams, inline images and workspace file links)
+- Tool execution cards with live output — hide them behind a toggle when they drown the conversation
 - Steer / follow-up while streaming, abort
 - Model + thinking-level selectors
-- Session list / resume / new / delete
-- First-run setup in the browser: no credentials, no cryptic failure — paste an API key, or declare your own OpenAI-compatible endpoint
-- Collapsible file-browser sidebar: lazy-loaded tree + read-only preview (syntax-highlighted, Markdown rendered), confined to the same root the agent's own tools can see; entries outside `sandbox.writableRoot` render dimmed
+- First-run setup in the browser: no credentials, no cryptic failure — paste an API key, or declare your own OpenAI-compatible endpoint (see [Model credentials](#model-credentials))
+- Sessions: list, resume, rename, delete, and full-text search across saved transcripts
+- Conversation tree: edit a past message to re-ask it, and the old exchange stays reachable as a branch you can navigate back to
+- File browser: lazy-loaded tree, full-size viewer (syntax-highlighted, Markdown rendered) and an editor with save inside the writable zone — all confined to the same root the agent's own tools can see; entries outside `sandbox.writableRoot` render dimmed
+- Attachments: drop or paste images and text files into the composer; the file you are previewing attaches itself as an `@path` reference, so the agent reads it on demand instead of the prompt carrying its content
+- Git: uncommitted-change badges in the tree, per-file diffs in the viewer, log and commit inspection
 - Slash commands with autocompletion (`/` in the composer: extension commands, prompt templates, skills)
 - File mentions with autocompletion (`@` in the composer: recursive name search over the browser root, inserts the relative path)
 - Extension "Custom UI" support: dialogs, notifications, status/widgets, editor prefill (see below)
@@ -246,7 +249,7 @@ web/  (React + Vite + Tailwind)          server/  (Fastify + ws)
 
 Sessions persist in `<agentDir>/sessions/` — reconnecting clients receive the full history (`hello` message).
 
-Planned: fork/tree navigation, images.
+**Single-tenant by design.** One `AgentSession`, one `clients` set, and `broadcast()` sends every event to every socket: two people connected to the same server share one conversation, and the sandbox roots are resolved once at startup. That is deliberate for a personal deployment, and the thing to fix before a shared one — see [#4, multi-user support](https://github.com/laurentftech/pi-outpost/issues/4).
 
 ## License
 
