@@ -6,12 +6,14 @@ import type {
   ClientMessage,
   CommandInfo,
   ContextUsage,
+  CredentialStatus,
   DirEntry,
   ExtensionUIRequest,
   FileSearchEntry,
   GitFileState,
   GitLogEntry,
   ModelChoice,
+  ProviderCompat,
   ServerMessage,
   SessionSummary,
   ThinkingLevel,
@@ -113,6 +115,8 @@ export interface AgentState {
   openFile: OpenFile | null;
   /** Writable zone in the file browser; see SessionSnapshot.writableRoot. */
   writableRoot?: string | null;
+  /** Which providers can answer; drives the onboarding screen. Never carries a key. */
+  credentials: CredentialStatus | null;
   fileSearch: FileSearch | null;
   gitAvailable: boolean;
   gitStatus: GitStatusState | null;
@@ -150,6 +154,7 @@ const initialState: AgentState = {
   openFile: null,
   fileSearch: null,
   gitAvailable: false,
+  credentials: null,
   gitStatus: null,
   gitDiff: null,
   gitLog: null,
@@ -236,6 +241,7 @@ function applySnapshot(state: AgentState, message: ServerMessage & { sessionId: 
     tree: null,
     writableRoot: message.writableRoot,
     gitAvailable: message.gitAvailable === true,
+    credentials: message.credentials ?? null,
   };
 }
 
@@ -767,5 +773,10 @@ export function useAgent(serverUrl = "", explicitToken?: string, embedded = fals
     fetchGitLog: (limit?: number) => sendMessage({ type: "git_log", ...(limit ? { limit } : {}), requestId: `gitlog:${crypto.randomUUID()}` }),
     fetchGitShow: (sha: string) => sendMessage({ type: "git_show", sha, requestId: `gitshow:${crypto.randomUUID()}` }),
     clearGitShow: () => dispatch({ type: "git_show_cleared" }),
+    /** Onboarding: store an API key for a provider the server already knows. */
+    setCredential: (provider: string, apiKey: string) => sendMessage({ type: "set_credential", provider, apiKey }),
+    /** Onboarding: declare an OpenAI-compatible endpoint (corporate gateway, vLLM, Ollama…). */
+    declareProvider: (declaration: { provider: string; baseUrl: string; apiKey: string; models: string[]; compat?: ProviderCompat }) =>
+      sendMessage({ type: "declare_provider", ...declaration }),
   };
 }

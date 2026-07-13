@@ -43,6 +43,8 @@ Usage
   pi-outpost [options]           start the server
   pi-outpost init [options]      write a starter configuration file
   pi-outpost config [options]    print the configuration that would be used, and where it came from
+  pi-outpost login --provider <name>
+                                 store an API key for a provider in <agentDir>/auth.json
 
 Options
   --config <path>    configuration file to use
@@ -57,6 +59,17 @@ Options
 init options
   --global           write to the user config directory instead of ./
   --force            overwrite an existing file
+
+login options
+  --provider <name>  provider to store a key for (e.g. anthropic, openai, mistral)
+
+The key itself has no flag, for the same reason the auth token has none: argv is
+world-readable. It is prompted for on a terminal, or read from stdin when piped:
+  echo "$KEY" | pi-outpost login --provider anthropic
+
+For an OpenAI-compatible endpoint of your own (a corporate gateway, vLLM, Ollama),
+open the UI: it declares the base URL, the model and the compatibility flags such
+servers need, and writes them to <agentDir>/models.json.
 
 Configuration is read from the first of these that exists:
   1. --config <path>
@@ -77,13 +90,14 @@ $PI_OUTPOST_TOKEN or the file's server.token.
 export class CliError extends Error {}
 
 export interface ParsedCli {
-  command: "serve" | "init" | "config" | "help" | "version";
+  command: "serve" | "init" | "config" | "login" | "help" | "version";
   flags: CliOptions;
   init: { global: boolean; force: boolean };
+  login: { provider?: string };
 }
 
-type Command = "init" | "config";
-const COMMANDS: readonly string[] = ["init", "config"] satisfies Command[];
+type Command = "init" | "config" | "login";
+const COMMANDS: readonly string[] = ["init", "config", "login"] satisfies Command[];
 
 function integerFlag(value: string | undefined, name: string): number | undefined {
   if (value === undefined) return undefined;
@@ -109,6 +123,7 @@ export function parseCli(argv: string[]): ParsedCli {
         host: { type: "string" },
         global: { type: "boolean", default: false },
         force: { type: "boolean", default: false },
+        provider: { type: "string" },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", short: "v", default: false },
       },
@@ -138,7 +153,48 @@ export function parseCli(argv: string[]): ParsedCli {
   };
 
   const kind = values.help ? "help" : values.version ? "version" : (command ?? "serve");
-  return { command: kind, flags, init: { global: values.global, force: values.force } };
+  return {
+    command: kind,
+    flags,
+    init: { global: values.global, force: values.force },
+    login: { provider: values.provider },
+  };
+}
+
+/**
+ * Read the key for `login`: from stdin when piped, otherwise prompted with the echo
+ * off. Never from a flag — argv is readable by anyone who can list processes, which
+ * is exactly why there is no `--token` either.
+ */
+export async function readSecret(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+    return Buffer.concat(chunks).toString("utf8").trim();
+  }
+  const ENTER = ["\r", "\n"];
+  const CTRL_C = "\u0003";
+  const BACKSPACE = ["\u007f", "\b"];
+
+  process.stdout.write(prompt);
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  let typed = "";
+  try {
+    for await (const chunk of process.stdin) {
+      const text = (chunk as Buffer).toString("utf8");
+      if (ENTER.includes(text)) break;
+      // Ctrl-C must abort, not hand back half a key
+      if (text === CTRL_C) throw new CliError("cancelled");
+      if (BACKSPACE.includes(text)) typed = typed.slice(0, -1);
+      else typed += text;
+    }
+  } finally {
+    process.stdin.setRawMode(false);
+    process.stdin.pause();
+    process.stdout.write("\n");
+  }
+  return typed.trim();
 }
 
 /** Where `init` writes, and where a bare `pi-outpost` would look for it afterwards. */

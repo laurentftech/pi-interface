@@ -18,6 +18,7 @@ A Node server embeds a pi `AgentSession` and bridges it to a React chat UI over 
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Production (single process)](#production-single-process)
+- [Model credentials](#model-credentials)
 - [Standalone configuration](#standalone-configuration)
 - [Embedding](#embedding)
 - [Architecture](#architecture)
@@ -29,6 +30,7 @@ A Node server embeds a pi `AgentSession` and bridges it to a React chat UI over 
 - Steer / follow-up while streaming, abort
 - Model + thinking-level selectors
 - Session list / resume / new / delete
+- First-run setup in the browser: no credentials, no cryptic failure — paste an API key, or declare your own OpenAI-compatible endpoint
 - Collapsible file-browser sidebar: lazy-loaded tree + read-only preview (syntax-highlighted, Markdown rendered), confined to the same root the agent's own tools can see; entries outside `sandbox.writableRoot` render dimmed
 - Slash commands with autocompletion (`/` in the composer: extension commands, prompt templates, skills)
 - File mentions with autocompletion (`@` in the composer: recursive name search over the browser root, inserts the relative path)
@@ -38,7 +40,7 @@ A Node server embeds a pi `AgentSession` and bridges it to a React chat UI over 
 
 ## Quick start
 
-Requirements: Node ≥ 22.19 (what the pi SDK itself requires), and [pi](https://github.com/earendil-works/pi) configured (`~/.pi/agent/auth.json` or provider env vars like `ANTHROPIC_API_KEY`).
+Requirements: Node ≥ 22.19 (what the pi SDK itself requires), and **model credentials**. You do *not* need [pi](https://github.com/earendil-works/pi) installed — its SDK is bundled here.
 
 ### Run it
 
@@ -46,6 +48,8 @@ Requirements: Node ≥ 22.19 (what the pi SDK itself requires), and [pi](https:/
 npx pi-outpost init   # writes a starter pi-outpost.config.json here
 npx pi-outpost        # serves the UI on http://127.0.0.1:3141/
 ```
+
+Open the UI with no credentials and it asks for them: pick a provider and paste an API key, or declare an OpenAI-compatible endpoint of your own (see [Model credentials](#model-credentials)). Nothing to restart — the chat is usable as soon as you save.
 
 pi-outpost never starts without a configuration file: the agent's working directory, its tools and its sandbox are decided there, and guessing them from whatever directory you happen to be standing in is not a decision anyone wants made for them. `init` writes the safe version of that file (read-only, no bash) for you to open up as needed.
 
@@ -93,6 +97,8 @@ Need to distribute a version that doesn't require Node.js installed at all (e.g.
 pi-outpost [options]          start the server
 pi-outpost init [options]     write a starter configuration file
 pi-outpost config [options]   print the configuration that would be used, and where it came from
+pi-outpost login --provider <name>
+                              store an API key in <agentDir>/auth.json
 ```
 
 > **Upgrading from a pre-`0.1.0` clone?** Three behaviours changed. The server now **refuses to start without a configuration file** (it used to fall back to a plain local pi: your launch directory as workspace, full toolset, bash enabled) — run `pi-outpost init`. `PI_OUTPOST_PORT`/`PORT` now **override** `server.port` instead of being overridden by it, in line with `PI_OUTPOST_TOKEN`, which always won. And `PI_CWD` is now `PI_OUTPOST_CWD`.
@@ -103,12 +109,41 @@ pi-outpost config [options]   print the configuration that would be used, and wh
 | `--profile <name>` | Use `<user config dir>/profiles/<name>.json` |
 | `--cwd <dir>` | Directory the agent works in |
 | `--agent-dir <dir>` | pi config/session store (default `~/.pi/agent`) |
+| `login --provider <name>` | Store a key for that provider (prompted, or read from stdin — never a flag) |
 | `--port <n>` / `--host <addr>` | Where to listen (default `127.0.0.1:3141`) |
 | `-h, --help` / `-v, --version` | |
 | `init --global` | Write to the user config directory instead of `./` |
 | `init --force` | Overwrite an existing file |
 
 There is deliberately **no `--token` flag**: a secret on the command line is readable by anyone who can list processes. Use `PI_OUTPOST_TOKEN` or the file's `server.token`.
+
+## Model credentials
+
+Credentials come from either **provider environment variables** (`ANTHROPIC_API_KEY`, …) or an **`auth.json` in the agent directory** — `<agentDir>/auth.json`, which is `~/.pi/agent/auth.json` unless your config names its own `agentDir`. Point that key at an isolated directory (as the sandbox advice below suggests) and it starts empty: that is the case this section exists for.
+
+Three ways to fill it:
+
+| | |
+|---|---|
+| **The UI** | With no usable model, pi-outpost shows a setup screen instead of a chat that could only fail. Paste a key, or declare your own endpoint. It writes `<agentDir>/auth.json` and starts working immediately — no restart. |
+| **`pi-outpost login`** | For headless servers, where no browser will ever open the UI:<br>`pi-outpost login --provider anthropic` (prompts, not echoed)<br>`echo "$KEY" \| pi-outpost login --provider anthropic` (scripted)<br>The key has no flag on purpose — argv is readable by anyone who can list processes, the same reason there is no `--token`. |
+| **Environment** | `export ANTHROPIC_API_KEY=…` before starting. Nothing is written to disk. |
+
+### An OpenAI-compatible endpoint of your own
+
+A corporate gateway, vLLM, SGLang, Ollama, LM Studio — anything speaking the OpenAI API. Declare it from the UI's setup screen (name, base URL, key, model id) and it is written to `<agentDir>/models.json` in pi's own format, so it survives restarts and any pi process sharing that directory sees it.
+
+The two **compatibility** checkboxes on that form are not a detail to skip. Many OpenAI-compatible servers reject the `developer` role and the `reasoning_effort` field that pi sends to reasoning-capable models — and when they do, *every* turn fails, with an error that never names the cause. Unchecking them makes pi send a plain `system` message and drop `reasoning_effort`.
+
+### Behind a TLS-inspecting proxy
+
+A corporate proxy that re-signs certificates with an internal CA makes Node reject the chain, which surfaces as a bare `fetch failed`. Trust the CA, and everything verifies normally:
+
+```bash
+export NODE_EXTRA_CA_CERTS=/path/to/corp-ca.pem
+```
+
+pi-outpost detects that failure and names this variable rather than leaving you to guess. There is deliberately **no configuration key that disables TLS verification**: it would disable it for every outbound connection — including the one carrying your API key — and a flag in a file gets copied between machines and outlives the reason it was added. `NODE_TLS_REJECT_UNAUTHORIZED=0` remains available to whoever sets it knowingly, at launch, for as long as that shell lives.
 
 ## Standalone configuration
 
@@ -136,7 +171,7 @@ See [`pi-outpost.config.example.json`](pi-outpost.config.example.json).
 | Key | Effect |
 |-----|--------|
 | `cwd` | Agent working directory |
-| `agentDir` | Own config dir (auth, models, settings, sessions) — fully separate from `~/.pi/agent` |
+| `agentDir` | Own config dir (auth, models, settings, sessions) — fully separate from `~/.pi/agent`. It starts with **no credentials**: see [Model credentials](#model-credentials) |
 | `sandbox.root` | Read-only zone: read/ls/grep/find are confined to this directory, symlinks resolved. Defaults to `cwd` if omitted |
 | `sandbox.allowWrite` | Adds edit/write, confined to `sandbox.writableRoot` (or the whole root if unset) (default `false`) |
 | `sandbox.writableRoot` | Read-write zone: subdirectory of `root` that edit/write are further confined to. Must be inside `root`. Defaults to `root` itself |

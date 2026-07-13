@@ -41,7 +41,7 @@ export async function makeWorkspace(files = {}) {
  * Start a server on `config.server.port` with the given config (paths already
  * absolute). Resolves once /health answers. Always `await server.stop()`.
  */
-export async function startServer(root, config = {}) {
+export async function startServer(root, config = {}, options = {}) {
   const port = config.server?.port ?? freePort();
   const full = {
     cwd: root,
@@ -63,9 +63,18 @@ export async function startServer(root, config = {}) {
   // thing down. Without it, killing the child leaves the real node process alive,
   // still holding this file's stdout pipe — the test file then never exits, and the
   // CI job hangs until it is cancelled. (macOS happened to reap it; Linux does not.)
+  // `options.env` patches the child's environment; a key set to undefined is *removed*.
+  // Credential tests need that: the developer's own ANTHROPIC_API_KEY (or CI's) would
+  // otherwise configure the very server the test needs to find unconfigured.
+  const env = { ...process.env, PI_OUTPOST_CONFIG: configPath };
+  for (const [key, value] of Object.entries(options.env ?? {})) {
+    if (value === undefined) delete env[key];
+    else env[key] = value;
+  }
+
   const child = spawn(TSX, [ENTRY], {
     cwd: SERVER_DIR,
-    env: { ...process.env, PI_OUTPOST_CONFIG: configPath },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
   });

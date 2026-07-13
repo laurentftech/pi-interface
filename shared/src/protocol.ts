@@ -215,6 +215,23 @@ export interface SessionSnapshot {
   writableRoot?: string | null;
   /** Whether the browser root is inside a git work tree (and git is installed). */
   gitAvailable?: boolean;
+  /** Which providers are usable, and whether the agent can answer at all. Never carries a key. */
+  credentials?: CredentialStatus;
+}
+
+/**
+ * What the client needs to decide between "you have not set up a provider yet"
+ * (onboarding) and "your providers are fine, but no model is left" (a config
+ * problem — `allowedModels` filtering everything out, say). Conflating the two
+ * sends a configured user to a screen asking for a key he already gave.
+ */
+export interface CredentialStatus {
+  /** Provider ids the registry knows, with whether each has usable auth. */
+  providers: { id: string; name: string; configured: boolean }[];
+  /** A model with usable credentials exists — the agent can answer. */
+  usableModel: boolean;
+  /** Where credentials are stored, so an error can name it (`<agentDir>/auth.json`). */
+  agentDir: string;
 }
 
 /** Server -> client */
@@ -319,4 +336,22 @@ export type ClientMessage =
   | { type: "git_log"; limit?: number; requestId: string }
   | { type: "git_diff"; path: string; requestId: string }
   | { type: "git_show"; sha: string; requestId: string }
+  /**
+   * Store an API key for a known provider. Carries no auth of its own: it rides the
+   * token check that already guards /ws, and the server refuses to bind off-loopback
+   * without a token — so this write is never reachable unauthenticated from a network.
+   */
+  | { type: "set_credential"; provider: string; apiKey: string }
+  /** Declare an OpenAI-compatible endpoint (a corporate gateway, vLLM, Ollama…). */
+  | { type: "declare_provider"; provider: string; baseUrl: string; apiKey: string; models: string[]; compat?: ProviderCompat }
   | ExtensionUIResponse;
+
+/**
+ * Flags an OpenAI-compatible server may need. They are not cosmetic: a gateway that
+ * rejects the `developer` role or `reasoning_effort` fails on *every* turn, and the
+ * error never says so — which is why the UI asks rather than letting the user guess.
+ */
+export interface ProviderCompat {
+  supportsDeveloperRole?: boolean;
+  supportsReasoningEffort?: boolean;
+}

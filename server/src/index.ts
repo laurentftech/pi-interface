@@ -25,9 +25,11 @@ import {
   type ClientMessage,
   type CommandInfo,
   type ContextUsage,
+  type CredentialStatus,
   type ExtensionUIRequest,
   type ExtensionUIResponse,
   type ModelChoice,
+  type ProviderCompat,
   type ServerMessage,
   type SessionSnapshot,
   type SessionSummary,
@@ -36,8 +38,18 @@ import {
   type WireImage,
 } from "@pi-outpost/shared";
 import path from "node:path";
-import { helpText, parseCli, runInit } from "./cli.ts";
+import { CliError, helpText, parseCli, readSecret, runInit } from "./cli.ts";
 import { loadConfig, NoConfigError } from "./config.ts";
+import {
+  CredentialError,
+  type ProviderDeclaration,
+  providerConfig,
+  storeApiKey,
+  storeProvider,
+  tlsHint,
+  validBaseUrl,
+  validProviderId,
+} from "./credentials.ts";
 import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
 import { FileBrowserError, listDirectory, readFileForPreview, readFileRaw, writeFileFromBrowser, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
 import { GitError, gitHeadContent, gitLog, gitShow, gitStatus, probeGit } from "./git.ts";
@@ -132,6 +144,23 @@ const AGENT_CWD = config.cwd;
 const AGENT_DIR = config.agentDir ?? getAgentDir();
 // Own agentDir ⇒ own session store, fully separate from ~/.pi/agent
 const SESSION_DIR = config.agentDir ? path.join(config.agentDir, "sessions") : undefined;
+
+// Store a key where *this* configuration will look for it, then leave: an isolated
+// agentDir starts with no auth.json, and copying one in by hand was the only way.
+if (cli.command === "login") {
+  try {
+    if (!validProviderId(cli.login.provider)) {
+      throw new CliError('login needs a provider: pi-outpost login --provider anthropic');
+    }
+    const key = await readSecret(`API key for ${cli.login.provider} (not echoed): `);
+    const written = await storeApiKey(AGENT_DIR, cli.login.provider, key);
+    console.log(`[pi] stored ${cli.login.provider} credentials in ${written}\n[pi] run: pi-outpost`);
+    process.exit(0);
+  } catch (error) {
+    complain(error);
+    process.exit(1);
+  }
+}
 
 const sandboxedTools = config.sandbox ? await createSandboxedTools(config.sandbox) : undefined;
 const BROWSER_ROOT = await resolveBrowserRoot(config);
@@ -428,6 +457,32 @@ function availableModels(): ModelChoice[] {
 }
 
 /**
+ * Which providers can actually answer, and where their credentials live.
+ *
+ * The client needs "no provider is configured" (onboard the user) apart from
+ * "providers are configured but no model survives `allowedModels`" (a config
+ * problem) — hence `providers` *and* `usableModel`, rather than an empty model
+ * list, which conflates the two.
+ */
+function credentialStatus(): CredentialStatus {
+  const registry = runtime.services.modelRegistry;
+  const providers = new Map<string, { id: string; name: string; configured: boolean }>();
+  for (const model of registry.getAll()) {
+    if (providers.has(model.provider)) continue;
+    providers.set(model.provider, {
+      id: model.provider,
+      name: registry.getProviderDisplayName(model.provider),
+      configured: registry.getProviderAuthStatus(model.provider).configured,
+    });
+  }
+  return {
+    providers: [...providers.values()],
+    usableModel: availableModels().length > 0,
+    agentDir: AGENT_DIR,
+  };
+}
+
+/**
  * Slash commands the composer can autocomplete. session.prompt() understands
  * all three: extension commands run immediately, prompt templates and
  * /skill:name are expanded before being sent to the model.
@@ -497,6 +552,7 @@ function snapshot(): SessionSnapshot {
     contextUsage: contextUsage(),
     writableRoot: WRITABLE_ROOT,
     gitAvailable: GIT !== null,
+    credentials: credentialStatus(),
   };
 }
 
@@ -899,6 +955,65 @@ async function replaceSession(socket: WebSocket, action: () => Promise<{ cancell
   }
 }
 
+/**
+ * Store an API key, then make the agent usable *now*: the live session was built
+ * against a model with no auth, so a refreshed registry alone would not help it.
+ * Rebuilding through replaceSession is what turns the onboarding screen into a
+ * working chat without a restart or even a reload.
+ */
+async function handleSetCredential(socket: WebSocket, provider: string, apiKey: string): Promise<void> {
+  try {
+    // Through the session's own AuthStorage: the registry reads that instance, so a
+    // key written with any other one would sit on disk while the agent still claims
+    // to have none.
+    await storeApiKey(AGENT_DIR, provider, apiKey, runtime.services.authStorage);
+  } catch (error) {
+    send(socket, { type: "error", message: error instanceof CredentialError ? error.message : String(error) });
+    return;
+  }
+  runtime.services.modelRegistry.refresh();
+  await adoptUsableModel(socket);
+}
+
+/** Declare an OpenAI-compatible endpoint: live for this session, and persisted for the next. */
+async function handleDeclareProvider(socket: WebSocket, declaration: ProviderDeclaration): Promise<void> {
+  try {
+    await storeProvider(AGENT_DIR, declaration);
+    runtime.services.modelRegistry.registerProvider(declaration.provider, providerConfig(declaration));
+  } catch (error) {
+    send(socket, { type: "error", message: error instanceof CredentialError ? error.message : String(error) });
+    return;
+  }
+  await adoptUsableModel(socket);
+}
+
+/**
+ * Move the live session onto a model that can actually answer, and tell every client.
+ *
+ * The session itself is fine — it was only pointed at a model with no auth — so this
+ * re-points it rather than rebuilding it, and the conversation (empty on a first run,
+ * but not necessarily: credentials can also expire mid-session) survives untouched.
+ * Clients get a full snapshot, which is what carries the new model list and status.
+ */
+async function adoptUsableModel(socket: WebSocket): Promise<void> {
+  const choices = availableModels();
+  if (choices.length === 0) {
+    send(socket, {
+      type: "error",
+      message: `Credentials stored in ${AGENT_DIR}, but no model is available — check "allowedModels" in your configuration.`,
+    });
+    broadcast({ type: "session_replaced", ...snapshot() });
+    return;
+  }
+  const current = runtime.session.model as { provider?: string; id?: string } | undefined;
+  const usable = choices.some((choice) => choice.provider === current?.provider && choice.id === current?.id);
+  if (!usable) {
+    const target = runtime.services.modelRegistry.find(choices[0].provider, choices[0].id);
+    if (target) await runtime.session.setModel(target);
+  }
+  broadcast({ type: "session_replaced", ...snapshot() });
+}
+
 const MAX_IMAGES = 6;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // of base64 text
 
@@ -1133,7 +1248,11 @@ async function maybeNameSession(): Promise<void> {
 }
 
 function reportError(error: unknown): void {
-  broadcast({ type: "error", message: error instanceof Error ? error.message : String(error) });
+  // A TLS-inspecting proxy surfaces as a bare "fetch failed", with the real cause
+  // nested in `cause` — say what broke and how to fix it, rather than leaving the
+  // user to guess that their employer's proxy is in the way.
+  const message = tlsHint(error) ?? (error instanceof Error ? error.message : String(error));
+  broadcast({ type: "error", message });
 }
 
 // --- Fork / tree navigation -------------------------------------------------------
@@ -1555,6 +1674,22 @@ function handleClientMessage(socket: WebSocket, raw: string): void {
       if (typeof message.sha !== "string" || typeof message.requestId !== "string") return;
       handleGitShow(socket, message.sha, message.requestId).catch(reportError);
       break;
+    case "set_credential":
+      if (!validProviderId(message.provider) || typeof message.apiKey !== "string" || message.apiKey.trim() === "") return;
+      handleSetCredential(socket, message.provider, message.apiKey).catch(reportError);
+      break;
+    case "declare_provider":
+      if (!validProviderId(message.provider) || !validBaseUrl(message.baseUrl)) return;
+      if (typeof message.apiKey !== "string" || message.apiKey.trim() === "") return;
+      if (!Array.isArray(message.models) || message.models.length === 0) return;
+      handleDeclareProvider(socket, {
+        provider: message.provider,
+        baseUrl: message.baseUrl,
+        apiKey: message.apiKey,
+        models: message.models,
+        ...(message.compat ? { compat: message.compat } : {}),
+      }).catch(reportError);
+      break;
   }
 }
 
@@ -1578,6 +1713,17 @@ if (config.sandbox) {
   console.log(`[pi] sandbox ${config.sandbox.root} · ${extras}`);
 }
 console.log(`[pi] file browser root ${BROWSER_ROOT}`);
+// The old warning ("No models available") named neither the cause nor a way out, and
+// the failure only surfaced on the user's first message. Say it at startup, name the
+// directory the credentials are missing from, and point at both ways to supply them.
+if (!credentialStatus().usableModel) {
+  const configured = credentialStatus().providers.some((provider) => provider.configured);
+  console.warn(
+    configured
+      ? `[pi] no model available — providers are configured, but "allowedModels" leaves nothing to choose from`
+      : `[pi] no credentials in ${AGENT_DIR} — open the UI to set one up, or run "pi-outpost login --provider <name>" (provider environment variables work too)`,
+  );
+}
 
 // --- Shutdown -------------------------------------------------------------------------
 

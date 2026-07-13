@@ -19,6 +19,7 @@ import { FileViewer } from "./components/FileViewer";
 import { GitCommitView } from "./components/GitCommitView";
 import { Header } from "./components/Header";
 import { ModelBar } from "./components/ModelBar";
+import { Onboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
 import { TokenGate } from "./components/TokenGate";
 import { ToolCard } from "./components/ToolCard";
@@ -84,6 +85,8 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
     fetchGitLog,
     fetchGitShow,
     clearGitShow,
+    setCredential,
+    declareProvider,
   } = useAgent(serverUrl, token, embedded);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -254,6 +257,22 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
     return (
       <ThemeContext.Provider value={theme}>
         <TokenGate title={state.branding.title} onSubmit={submitToken} />
+      </ThemeContext.Provider>
+    );
+  }
+
+  // No model can answer: a chat here would only fail on the user's first message,
+  // with an error pointing at a terminal command this UI does not have. Ask instead.
+  if (state.credentials && !state.credentials.usableModel) {
+    return (
+      <ThemeContext.Provider value={theme}>
+        <Onboarding
+          title={state.branding.title}
+          credentials={state.credentials}
+          onSetCredential={setCredential}
+          onDeclareProvider={declareProvider}
+          errors={state.errors}
+        />
       </ThemeContext.Provider>
     );
   }
