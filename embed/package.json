@@ -3,6 +3,26 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Mount pi-outpost as a Shadow-DOM-isolated widget inside another web app.",
+  "license": "MIT",
+  "author": "Laurent Francoise",
+  "homepage": "https://github.com/laurentftech/pi-outpost#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laurentftech/pi-outpost.git",
+    "directory": "embed"
+  },
+  "bugs": {
+    "url": "https://github.com/laurentftech/pi-outpost/issues"
+  },
+  "keywords": [
+    "pi",
+    "coding-agent",
+    "chat",
+    "widget",
+    "shadow-dom",
+    "react",
+    "embed"
+  ],
   "main": "./dist/pi-outpost-embed.cjs",
   "module": "./dist/pi-outpost-embed.js",
   "types": "./dist/mount.d.ts",
@@ -11,20 +31,27 @@
       "types": "./dist/mount.d.ts",
       "import": "./dist/pi-outpost-embed.js",
       "require": "./dist/pi-outpost-embed.cjs"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "peerDependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "scripts": {
     "build": "tsc -b && vite build",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "prepack": "npm run build"
   },
   "devDependencies": {
+    "@microsoft/api-extractor": "^7.58.9",
     "@pi-outpost/shared": "*",
     "@tailwindcss/vite": "^4.3.2",
     "@types/react": "^19.2.17",

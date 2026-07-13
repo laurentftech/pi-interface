@@ -1,9 +1,21 @@
 import { createElement, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { Theme } from "@pi-outpost/shared";
+import type { Theme as WireTheme } from "@pi-outpost/shared";
 import App, { type AppHandle } from "web/App";
 // eslint-disable-next-line import/no-unresolved -- resolved at build time via the `?inline` query (raw CSS string)
 import css from "web/index.css?inline";
+
+/**
+ * Theme the widget starts in. Spelled out here rather than re-exported from
+ * @pi-outpost/shared: that package is private to this repo, so a published
+ * `mount.d.ts` importing from it would resolve to nothing in a consumer's
+ * project. The assignment below keeps the two in step.
+ */
+export type Theme = "light" | "dark" | "system";
+type Identical<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+// Drift makes Identical resolve to never, so this assignment stops compiling.
+const themeMatchesProtocol: Identical<Theme, WireTheme> = true;
+void themeMatchesProtocol;
 
 export interface MountOptions {
   /** pi-outpost backend origin, e.g. "https://api.example.com". Defaults to same-origin as the host page. */
