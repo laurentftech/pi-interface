@@ -9,20 +9,26 @@ on:
 
 permissions:
   contents: read
-  # Signed provenance ("built from this commit, by this workflow") — npm mints it
-  # from GitHub's OIDC token, so publishing needs it even with an NPM_TOKEN.
+  # The OIDC token GitHub mints for this workflow. npm's trusted publisher for both
+  # packages names this repo and this file, so the token *is* the credential: no
+  # NPM_TOKEN, nothing to steal from the repo's secrets, and provenance is attested
+  # from it automatically.
   id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 22 ships npm 10.
+      # Without this npm never even attempts OIDC, and asks for a token instead.
+      - run: npm install -g npm@latest
 
       - run: npm ci
 
@@ -60,10 +66,12 @@ jobs:
 
       # prepack rebuilds each package from this clean checkout, so what ships is what
       # was just tested — never a stale dist/ from someone's machine.
+      #
+      # No credential here on purpose: npm authenticates with the OIDC token above,
+      # against the trusted publisher registered for each package. `--provenance` is
+      # not passed either — trusted publishing attests it on its own.
       - name: Publish
         run: |
           for pkg in ${{ steps.plan.outputs.publish }}; do
-            npm publish --workspace "$pkg" --provenance
+            npm publish --workspace "$pkg"
           done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
