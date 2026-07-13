@@ -106,7 +106,7 @@ export function connect(url) {
     const message = JSON.parse(data.toString());
     received.push(message);
     for (const waiter of [...waiters]) {
-      if (waiter.match(message)) {
+      if (waiter.matches(message)) {
         waiters.splice(waiters.indexOf(waiter), 1);
         waiter.resolve(message);
       }
@@ -128,7 +128,7 @@ export function connect(url) {
       const existing = received.find(predicate);
       if (existing) return Promise.resolve(existing);
       return new Promise((resolve, reject) => {
-        const waiter = { match: predicate, resolve, reject };
+        const waiter = { matches: predicate, resolve, reject };
         waiters.push(waiter);
         setTimeout(() => {
           const i = waiters.indexOf(waiter);
