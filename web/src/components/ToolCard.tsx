@@ -166,6 +166,9 @@ export function ToolCard({ item }: { item: ToolItem }) {
   // Check if tool has formatted output (either HTML from extension or __pi_render envelope)
   const formattedOutput = item.output ? getFormattedToolOutput(item.output) : undefined;
   const hasFormattedOutput = Boolean(formattedOutput);
+  // Stable plugin references to prevent ReactMarkdown re-renders
+  const markdownPlugins = useMemo(() => [remarkGfm, remarkMath], []);
+  const rehypePluginsMemo = useMemo(() => [rehypeKatex], []);
   
   // Start collapsed to show formatted output; expanded state shows raw JSON for inspection
   // For edit/write tools with diffs, start expanded to show the diff
@@ -210,8 +213,8 @@ export function ToolCard({ item }: { item: ToolItem }) {
         <div className="border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
           <div className="prose-chat max-h-96 overflow-auto text-zinc-700 dark:text-zinc-300">
             <ReactMarkdown
-              remarkPlugins={useMemo(() => [remarkGfm, remarkMath], [])}
-              rehypePlugins={useMemo(() => [rehypeKatex], [])}
+              remarkPlugins={markdownPlugins}
+              rehypePlugins={rehypePluginsMemo}
             >
               {normalizeMathDelimiters(formattedOutput)}
             </ReactMarkdown>
