@@ -57,6 +57,34 @@ export function summarizeToolResult(toolName: string | undefined, raw?: string):
   try {
     const parsed = JSON.parse(raw);
     if (parsed === null || (typeof parsed !== "object" && !Array.isArray(parsed))) return null;
+
+    // Only synthesize a summary when the payload contains fields that indicate a
+    // user-facing rendering was intended. This avoids coalescing arbitrary tool
+    // outputs (search indexes, raw result dumps) into a faux-rendered card.
+    const renderKeys = new Set([
+      "title",
+      "task",
+      "summary",
+      "nextSteps",
+      "nextStepsText",
+      "relevantFiles",
+      "relevantFunctions",
+      "rendering",
+      "message",
+      "entries",
+      "entry",
+      "render",
+      "view",
+      "html",
+      "markdown",
+      "rendered",
+    ]);
+    if (typeof parsed === "object") {
+      const keys = Object.keys(parsed as Record<string, unknown>);
+      const hasRenderKey = keys.some((k) => renderKeys.has(k));
+      if (!hasRenderKey) return null;
+    }
+
     const lines: string[] = [];
     if ((parsed as any).title) lines.push(`**${String((parsed as any).title)}**`);
     if ((parsed as any).task) lines.push(`**${String((parsed as any).task)}**`);
@@ -170,40 +198,18 @@ export function historyToItems(messages: AnyMessage[], streaming = false, userEn
         const call = message.toolCallId ? pendingCalls.get(message.toolCallId) : undefined;
         if (message.toolCallId) pendingCalls.delete(message.toolCallId);
 
-        // Special-case openlore tool results: they return structured JSON useful for
-        // machine consumption, but we should present a concise human-readable
-        // summary in the UI while keeping the full payload in a collapsed `details`.
+        // Only synthesize a render when the tool's result appears intended for
+        // user-facing rendering. Use the shared summarizer which checks payload
+        // shape for rendering hints instead of promiscuously converting every
+        // openlore output.
         const raw = typeof message.content === "string" ? message.content : undefined;
         if (raw && (call?.name?.startsWith("openlore") || message.toolName?.startsWith("openlore"))) {
           try {
-            const parsed = JSON.parse(raw);
-            // Build a short markdown-ish summary
-            const lines: string[] = [];
-            if (parsed.task) lines.push(`**${String(parsed.task)}**`);
-            if (parsed.searchMode) lines.push(`Mode: ${String(parsed.searchMode)}`);
-            if (Array.isArray(parsed.relevantFiles) && parsed.relevantFiles.length > 0) {
-              lines.push(`\nRelevant files:`);
-              for (const f of (parsed.relevantFiles as string[]).slice(0, 5)) lines.push(`- ${f}`);
+            const summarized = summarizeToolResult(message.toolName ?? call?.name ?? undefined, raw);
+            if (summarized) {
+              items.push({ kind: "custom", customType: message.toolName ?? call?.name ?? "openlore", text: summarized.text, details: summarized.details });
+              break;
             }
-            if (Array.isArray(parsed.relevantFunctions) && parsed.relevantFunctions.length > 0) {
-              lines.push(`\nRelevant functions:`);
-              for (const fn of (parsed.relevantFunctions as any[]).slice(0, 5)) {
-                if (fn && fn.name) lines.push(`- ${fn.name} (${fn.filePath ?? fn.file ?? 'unknown'})`);
-                else lines.push(`- ${String(fn)}`);
-              }
-            }
-            if (Array.isArray(parsed.nextSteps) && parsed.nextSteps.length > 0) {
-              lines.push(`\nNext steps:`);
-              for (const s of (parsed.nextSteps as string[]).slice(0, 5)) lines.push(`- ${s}`);
-            }
-            const summary = lines.join("\n").trim() || JSON.stringify(parsed, null, 2);
-            items.push({
-              kind: "custom",
-              customType: message.toolName ?? call?.name ?? "openlore",
-              text: summary,
-              details: parsed,
-            });
-            break;
           } catch (e) {
             // fall through to default behavior
           }
