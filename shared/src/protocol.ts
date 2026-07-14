@@ -34,6 +34,12 @@ export type ChatItem =
       output: string;
       isError?: boolean;
       running?: boolean;
+      /** HTML from pi's renderResult (re-invoked server-side). */
+      outputHtml?: string;
+      /** Collapsed preview when it differs from outputHtml. */
+      outputHtmlCollapsed?: string;
+      /** HTML from pi's renderCall (re-invoked server-side). */
+      callHtml?: string;
     }
   | {
       /** Extension-defined message (pi.sendMessage() with a customType) — see extensions.md#message-and-entry-rendering. */
@@ -42,6 +48,10 @@ export type ChatItem =
       text: string;
       /** Extension-specific structured data, shown only when expanded (avoid a wall of JSON by default). */
       details?: unknown;
+      /** HTML from pi's MessageRenderer (re-invoked server-side). */
+      contentHtml?: string;
+      /** Collapsed preview when it differs from contentHtml. */
+      contentHtmlCollapsed?: string;
     };
 
 export interface AssistantBlock {
@@ -277,9 +287,16 @@ export type ServerMessage =
     }
   | { type: "assistant_end"; item: ChatItem }
   | { type: "custom_message"; item: ChatItem }
-  | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
+  | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown; callHtml?: string }
   | { type: "tool_update"; toolCallId: string; text: string }
-  | { type: "tool_end"; toolCallId: string; isError: boolean; text: string }
+  | {
+      type: "tool_end";
+      toolCallId: string;
+      isError: boolean;
+      text: string;
+      outputHtml?: string;
+      outputHtmlCollapsed?: string;
+    }
   | { type: "queue"; steering: string[]; followUp: string[] }
   | { type: "context_usage"; usage: ContextUsage }
   | { type: "compaction_start" }
