@@ -44,8 +44,8 @@ function getFormattedToolOutput(output: string): string | undefined {
       const summary = lines.join("\n").trim();
       if (summary) return summary;
       
-      // Fallback for any valid JSON object: return pretty-printed JSON in a markdown code block
-      return "```json\n" + JSON.stringify(parsed, null, 2) + "\n```";
+      // No formatted output for pure JSON - return undefined
+      return undefined;
     }
     // If parsed is a string, return it as-is (could be already formatted markdown)
     if (typeof parsed === "string") {
@@ -94,8 +94,8 @@ function getFormattedToolOutput(output: string): string | undefined {
           const summary = lines.join("\n").trim();
           if (summary) return summary;
           
-          // Fallback for recovered JSON: return pretty-printed JSON in a markdown code block
-          return "```json\n" + JSON.stringify(parsed, null, 2) + "\n```";
+          // No formatted output for pure JSON - return undefined
+          return undefined;
         }
       }
     } catch {
@@ -171,13 +171,10 @@ test("handles empty openlore output", () => {
   assert.equal(result, "**test**", "Should format minimal output");
 });
 
-test("returns pretty-printed JSON for objects without known fields", () => {
+test("returns undefined for objects without known fields", () => {
   const genericJson = `{"unknownField": "value", "another": 123}`;
   const result = getFormattedToolOutput(genericJson);
-  assert.notEqual(result, undefined, "Should return pretty-printed JSON");
-  assert.ok(result?.includes("```json"), "Should be wrapped in markdown code block");
-  assert.ok(result?.includes("unknownField"), "Should include field names");
-  assert.ok(result?.includes("value"), "Should include field values");
+  assert.equal(result, undefined, "Should return undefined for pure JSON without known fields");
 });
 
 test("handles simple JSON string", () => {
