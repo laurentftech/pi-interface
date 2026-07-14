@@ -97,10 +97,9 @@ export function ToolCard({ item }: { item: ToolItem }) {
   
   // Check if tool has formatted output (either HTML from extension or __pi_render envelope)
   const formattedOutput = hasHtml ? undefined : (item.output ? getFormattedToolOutput(item.output) : undefined);
-  const hasFormattedOutput = Boolean(formattedOutput);
   
-  // Show formatted output by default if available, otherwise show raw
-  const [open, setOpen] = useState(hasDiff || hasHtml || !hasFormattedOutput);
+  // Always start collapsed; user must explicitly expand to see details
+  const [open, setOpen] = useState(hasDiff || hasHtml);
   
   // A live tool card starts before its extension renderer has produced HTML.
   // Reveal the result as soon as it arrives, matching the TUI's completed view.
