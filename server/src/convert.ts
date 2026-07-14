@@ -48,7 +48,7 @@ export function contentText(content: string | AnyContent[] | undefined): string 
 }
 
 export function truncate(text: string, max = MAX_TOOL_OUTPUT): string {
-  if (text.length < max) return text;
+  if (text.length <= max) return text;
   return `${text.slice(0, max)}\n… [truncated, ${text.length} chars total]`;
 }
 
