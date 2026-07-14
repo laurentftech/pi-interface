@@ -2,8 +2,10 @@
  * Re-invoke pi extension TUI renderers server-side and convert ANSI → HTML.
  * Same approach as pi's export-html (`createToolHtmlRenderer`).
  *
- * pi-coding-agent does not export these modules in package.json "exports", so we
- * import from node_modules by relative path (stable in this monorepo layout).
+ * Relative imports from node_modules: pi-coding-agent does not export these modules
+ * in package.json "exports", so we reach into dist/ directly. Stable in the monorepo
+ * layout (they are resolved at build time, so a restructured node_modules is caught
+ * by tsc before shipping).
  */
 import { createCustomMessage } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/messages.js";
 import { ansiLinesToHtml } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/export-html/ansi-to-html.js";
@@ -33,22 +35,36 @@ export interface ExtensionRenderDeps {
   themeName?: string;
 }
 
-let deps: ExtensionRenderDeps | undefined;
-let theme: Theme | undefined;
-let toolRenderer: ReturnType<typeof createToolHtmlRenderer> | undefined;
+/**
+ * Encapsulated renderer state: a single module-level instance replaces the
+ * previous three bare `let` variables, making mutations explicit and preventing
+ * silent breakage if two callers invoke configureExtensionRender in unexpected
+ * order. The class is internal — the public API is unchanged.
+ */
+class ExtensionRenderer {
+  deps?: ExtensionRenderDeps;
+  theme?: Theme;
+  toolRenderer?: ReturnType<typeof createToolHtmlRenderer>;
+
+  configure(next: ExtensionRenderDeps | undefined): void {
+    this.deps = next;
+    this.theme = next ? (getThemeByName(next.themeName ?? "dark") ?? getThemeByName("dark")) : undefined;
+    this.toolRenderer =
+      next && this.theme
+        ? createToolHtmlRenderer({
+            getToolDefinition: (name: string) => next.getToolDefinition(name),
+            theme: this.theme,
+            cwd: next.cwd,
+            width: RENDER_WIDTH,
+          })
+        : undefined;
+  }
+}
+
+const renderer = new ExtensionRenderer();
 
 export function configureExtensionRender(next: ExtensionRenderDeps | undefined): void {
-  deps = next;
-  theme = next ? (getThemeByName(next.themeName ?? "dark") ?? getThemeByName("dark")) : undefined;
-  toolRenderer =
-    next && theme
-      ? createToolHtmlRenderer({
-          getToolDefinition: (name: string) => next.getToolDefinition(name),
-          theme,
-          cwd: next.cwd,
-          width: RENDER_WIDTH,
-        })
-      : undefined;
+  renderer.configure(next);
 }
 
 function componentToHtml(component: RenderComponent | undefined): string | undefined {
@@ -80,9 +96,9 @@ export function renderToolCallHtml(
   toolName: string,
   args: unknown,
 ): string | undefined {
-  if (!toolRenderer) return undefined;
+  if (!renderer.toolRenderer) return undefined;
   try {
-    const html = toolRenderer.renderCall(toolCallId, toolName, args);
+    const html = renderer.toolRenderer.renderCall(toolCallId, toolName, args);
     return html?.trim() || undefined;
   } catch {
     return undefined;
@@ -96,10 +112,10 @@ export function renderToolResultHtml(
   details: unknown,
   isError: boolean,
 ): RenderedHtml | undefined {
-  if (!toolRenderer) return undefined;
+  if (!renderer.toolRenderer) return undefined;
   try {
     const blocks = normalizeToolContent(content);
-    const rendered = toolRenderer.renderResult(toolCallId, toolName, blocks, details, isError);
+    const rendered = renderer.toolRenderer.renderResult(toolCallId, toolName, blocks, details, isError);
     if (!rendered?.expanded?.trim()) return undefined;
     return {
       expanded: rendered.expanded,
@@ -118,9 +134,9 @@ export function renderCustomMessageHtml(
   details: unknown | undefined,
   display: boolean,
 ): RenderedHtml | undefined {
-  if (!deps || !theme) return undefined;
-  const renderer = deps.getMessageRenderer(customType);
-  if (!renderer) return undefined;
+  if (!renderer.deps || !renderer.theme) return undefined;
+  const msgRenderer = renderer.deps.getMessageRenderer(customType);
+  if (!msgRenderer) return undefined;
 
   try {
     const message = createCustomMessage(
@@ -130,8 +146,8 @@ export function renderCustomMessageHtml(
       details,
       new Date().toISOString(),
     );
-    const collapsed = componentToHtml(renderer(message, { expanded: false }, theme) as RenderComponent);
-    const expanded = componentToHtml(renderer(message, { expanded: true }, theme) as RenderComponent);
+    const collapsed = componentToHtml(msgRenderer(message, { expanded: false }, renderer.theme) as RenderComponent);
+    const expanded = componentToHtml(msgRenderer(message, { expanded: true }, renderer.theme) as RenderComponent);
     if (!expanded) return undefined;
     return {
       expanded,
