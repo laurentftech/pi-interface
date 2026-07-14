@@ -50,7 +50,8 @@ import {
   validBaseUrl,
   validProviderId,
 } from "./credentials.ts";
-import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate, summarizeToolResult } from "./convert.ts";
+import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
+import { configureExtensionRender, renderToolCallHtml, renderToolResultHtml } from "./extensionRender.ts";
 import { FileBrowserError, listDirectory, readFileForPreview, readFileRaw, writeFileFromBrowser, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
 import { GitError, gitHeadContent, gitLog, gitShow, gitStatus, probeGit } from "./git.ts";
 import { createSandboxedTools, isWithin, realResolve } from "./sandbox.ts";
@@ -785,6 +786,16 @@ function cancelPendingExtensionRequests(): void {
   pendingExtensionRequests.clear();
 }
 
+/** Wire extension TUI renderers into the HTML bridge used by the web UI. */
+function refreshExtensionRender(): void {
+  configureExtensionRender({
+    getToolDefinition: (name) => runtime.session.getToolDefinition(name),
+    getMessageRenderer: (customType) => runtime.session.extensionRunner.getMessageRenderer(customType),
+    cwd: AGENT_CWD,
+    themeName: "dark",
+  });
+}
+
 /** (Re)bind the extension runtime — UI bridge, mode, error reporting — to the current session. */
 async function bindExtensionsForSession(): Promise<void> {
   // runtime.session.bindExtensions() has been observed to never settle in some
@@ -810,6 +821,7 @@ async function bindExtensionsForSession(): Promise<void> {
         reportError(new Error(`[extension ${err.extensionPath}] ${err.error}`));
       },
     });
+    refreshExtensionRender();
   } finally {
     clearTimeout(stallWarning);
   }
@@ -876,11 +888,13 @@ function bindSession(): () => void {
         }
         break;
       case "tool_execution_start":
+        const callHtml = renderToolCallHtml(event.toolCallId, event.toolName, event.args);
         broadcast({
           type: "tool_start",
           toolCallId: event.toolCallId,
           toolName: event.toolName,
           args: event.args,
+          ...(callHtml ? { callHtml } : {}),
         });
         if (event.toolName === "edit" || event.toolName === "write") {
           pendingFileMutations.set(event.toolCallId, event.args);
@@ -896,35 +910,22 @@ function bindSession(): () => void {
       case "tool_execution_end": {
         const raw = contentText(event.result?.content);
         const truncatedText = truncate(raw);
-        const shimEnabled = process.env.SHIM_TOOL_RESULT === "1";
-        if (shimEnabled) {
-          try {
-            const summarized = summarizeToolResult(event.toolName ?? undefined, raw);
-            if (summarized) {
-              const item = {
-                kind: "custom",
-                customType: event.toolName ?? "tool",
-                text: summarized.text,
-                details: summarized.details,
-              } as const;
-              broadcast({ type: "custom_message", item });
+        const rendered = renderToolResultHtml(
+          event.toolCallId,
+          event.toolName ?? "tool",
+          event.result?.content,
+          event.result?.details,
+          event.isError ?? false,
+        );
 
-              const args = pendingFileMutations.get(event.toolCallId);
-              pendingFileMutations.delete(event.toolCallId);
-              if (args !== undefined && !event.isError) void announceFileChange(args);
-              break;
-            }
-          } catch (e) {
-            // fall back to default below
-          }
-        }
-
-        // Default behavior: emit a plain tool_end with truncated text
         broadcast({
           type: "tool_end",
           toolCallId: event.toolCallId,
           isError: event.isError,
           text: truncatedText,
+          ...(rendered
+            ? { outputHtml: rendered.expanded, outputHtmlCollapsed: rendered.collapsed }
+            : {}),
         });
         {
           const args = pendingFileMutations.get(event.toolCallId);
