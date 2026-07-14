@@ -47,6 +47,42 @@ export function truncate(text: string, max = MAX_TOOL_OUTPUT): string {
   return `${text.slice(0, max)}\n… [truncated, ${text.length} chars total]`;
 }
 
+/**
+ * Heuristic summarizer for JSON tool results. Returns a short markdown-ish
+ * `text` plus the full parsed `details` when successful, or `null` when the
+ * payload isn't JSON or doesn't match expected shapes.
+ */
+export function summarizeToolResult(toolName: string | undefined, raw?: string): { text: string; details?: unknown } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed === null || (typeof parsed !== "object" && !Array.isArray(parsed))) return null;
+    const lines: string[] = [];
+    if ((parsed as any).title) lines.push(`**${String((parsed as any).title)}**`);
+    if ((parsed as any).task) lines.push(`**${String((parsed as any).task)}**`);
+    if ((parsed as any).summary) lines.push(String((parsed as any).summary));
+    if (Array.isArray((parsed as any).relevantFiles) && (parsed as any).relevantFiles.length > 0) {
+      lines.push(`\nRelevant files:`);
+      for (const f of ((parsed as any).relevantFiles as string[]).slice(0, 5)) lines.push(`- ${f}`);
+    }
+    if (Array.isArray((parsed as any).relevantFunctions) && (parsed as any).relevantFunctions.length > 0) {
+      lines.push(`\nRelevant functions:`);
+      for (const fn of ((parsed as any).relevantFunctions as any[]).slice(0, 5)) {
+        if (fn && fn.name) lines.push(`- ${fn.name} (${fn.filePath ?? fn.file ?? 'unknown'})`);
+        else lines.push(`- ${String(fn)}`);
+      }
+    }
+    if (Array.isArray((parsed as any).nextSteps) && (parsed as any).nextSteps.length > 0) {
+      lines.push(`\nNext steps:`);
+      for (const s of ((parsed as any).nextSteps as string[]).slice(0, 5)) lines.push(`- ${s}`);
+    }
+    const summary = lines.join("\n").trim() || JSON.stringify(parsed, null, 2);
+    return { text: summary, details: parsed };
+  } catch (e) {
+    return null;
+  }
+}
+
 function assistantBlocks(content: string | AnyContent[]): AssistantBlock[] {
   const blocks: AssistantBlock[] = [];
   if (!Array.isArray(content)) return blocks;
@@ -133,6 +169,46 @@ export function historyToItems(messages: AnyMessage[], streaming = false, userEn
       case "toolResult": {
         const call = message.toolCallId ? pendingCalls.get(message.toolCallId) : undefined;
         if (message.toolCallId) pendingCalls.delete(message.toolCallId);
+
+        // Special-case openlore tool results: they return structured JSON useful for
+        // machine consumption, but we should present a concise human-readable
+        // summary in the UI while keeping the full payload in a collapsed `details`.
+        const raw = typeof message.content === "string" ? message.content : undefined;
+        if (raw && (call?.name?.startsWith("openlore") || message.toolName?.startsWith("openlore"))) {
+          try {
+            const parsed = JSON.parse(raw);
+            // Build a short markdown-ish summary
+            const lines: string[] = [];
+            if (parsed.task) lines.push(`**${String(parsed.task)}**`);
+            if (parsed.searchMode) lines.push(`Mode: ${String(parsed.searchMode)}`);
+            if (Array.isArray(parsed.relevantFiles) && parsed.relevantFiles.length > 0) {
+              lines.push(`\nRelevant files:`);
+              for (const f of (parsed.relevantFiles as string[]).slice(0, 5)) lines.push(`- ${f}`);
+            }
+            if (Array.isArray(parsed.relevantFunctions) && parsed.relevantFunctions.length > 0) {
+              lines.push(`\nRelevant functions:`);
+              for (const fn of (parsed.relevantFunctions as any[]).slice(0, 5)) {
+                if (fn && fn.name) lines.push(`- ${fn.name} (${fn.filePath ?? fn.file ?? 'unknown'})`);
+                else lines.push(`- ${String(fn)}`);
+              }
+            }
+            if (Array.isArray(parsed.nextSteps) && parsed.nextSteps.length > 0) {
+              lines.push(`\nNext steps:`);
+              for (const s of (parsed.nextSteps as string[]).slice(0, 5)) lines.push(`- ${s}`);
+            }
+            const summary = lines.join("\n").trim() || JSON.stringify(parsed, null, 2);
+            items.push({
+              kind: "custom",
+              customType: message.toolName ?? call?.name ?? "openlore",
+              text: summary,
+              details: parsed,
+            });
+            break;
+          } catch (e) {
+            // fall through to default behavior
+          }
+        }
+
         items.push({
           kind: "tool",
           toolCallId: message.toolCallId ?? "",
@@ -203,6 +279,12 @@ export function assistantToItem(message: AnyMessage): ChatItem {
  * text content, with `details` along for an optional expanded view.
  */
 export function customMessageToItem(message: AnyMessage): ChatItem {
+  console.log("[DEBUG] customMessageToItem called:", {
+    customType: message.customType,
+    contentType: typeof message.content,
+    contentLength: typeof message.content === "string" ? message.content.length : Array.isArray(message.content) ? message.content.length : "unknown",
+    detailsKeys: message.details ? Object.keys(message.details) : "none",
+  });
   return {
     kind: "custom",
     customType: message.customType ?? "custom",

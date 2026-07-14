@@ -50,7 +50,7 @@ import {
   validBaseUrl,
   validProviderId,
 } from "./credentials.ts";
-import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate } from "./convert.ts";
+import { assistantToItem, contentText, customMessageToItem, historyToItems, truncate, summarizeToolResult } from "./convert.ts";
 import { FileBrowserError, listDirectory, readFileForPreview, readFileRaw, writeFileFromBrowser, resolveBrowserRoot, resolveWritableRoot, searchFiles } from "./fileBrowser.ts";
 import { GitError, gitHeadContent, gitLog, gitShow, gitStatus, probeGit } from "./git.ts";
 import { createSandboxedTools, isWithin, realResolve } from "./sandbox.ts";
@@ -569,15 +569,26 @@ function snapshot(): SessionSnapshot {
 
 const clients = new Set<WebSocket>();
 
+const WS_LOG_PATH = process.env.WS_LOG_PATH ? path.resolve(process.env.WS_LOG_PATH) : undefined;
+
 function broadcast(message: ServerMessage): void {
   const data = JSON.stringify(message);
+  // Optional file logging for debugging WebSocket payloads
+  if (WS_LOG_PATH) {
+    // Best-effort write; don't block the event loop on failures
+    fs.appendFile(WS_LOG_PATH, data + "\n").catch(() => {});
+  }
   for (const socket of clients) {
     if (socket.readyState === socket.OPEN) socket.send(data);
   }
 }
 
 function send(socket: WebSocket, message: ServerMessage): void {
-  if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
+  const data = JSON.stringify(message);
+  if (WS_LOG_PATH) {
+    fs.appendFile(WS_LOG_PATH, data + "\n").catch(() => {});
+  }
+  if (socket.readyState === socket.OPEN) socket.send(data);
 }
 
 // --- Extension "Custom UI" bridge -----------------------------------------------
@@ -882,12 +893,38 @@ function bindSession(): () => void {
         }
         break;
       }
-      case "tool_execution_end":
+      case "tool_execution_end": {
+        const raw = contentText(event.result?.content);
+        const truncatedText = truncate(raw);
+        const shimEnabled = process.env.SHIM_TOOL_RESULT === "1";
+        if (shimEnabled) {
+          try {
+            const summarized = summarizeToolResult(event.toolName ?? undefined, raw);
+            if (summarized) {
+              const item = {
+                kind: "custom",
+                customType: event.toolName ?? "tool",
+                text: summarized.text,
+                details: summarized.details,
+              } as const;
+              broadcast({ type: "custom_message", item });
+
+              const args = pendingFileMutations.get(event.toolCallId);
+              pendingFileMutations.delete(event.toolCallId);
+              if (args !== undefined && !event.isError) void announceFileChange(args);
+              break;
+            }
+          } catch (e) {
+            // fall back to default below
+          }
+        }
+
+        // Default behavior: emit a plain tool_end with truncated text
         broadcast({
           type: "tool_end",
           toolCallId: event.toolCallId,
           isError: event.isError,
-          text: truncate(contentText(event.result?.content)),
+          text: truncatedText,
         });
         {
           const args = pendingFileMutations.get(event.toolCallId);
@@ -897,6 +934,7 @@ function bindSession(): () => void {
           if (args !== undefined && !event.isError) void announceFileChange(args);
         }
         break;
+      }
       case "queue_update":
         broadcast({ type: "queue", steering: [...event.steering], followUp: [...event.followUp] });
         break;
