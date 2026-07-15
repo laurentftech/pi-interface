@@ -104,7 +104,7 @@ describe("configuration: discovery, precedence, profiles", () => {
     assert.match(out, /pi-outpost init/);
     // the two implicit locations it looked in, named so the user can act on it
     assert.match(out, /pi-outpost\.config\.json/);
-    assert.match(out, /xdg\/pi-outpost\/config\.json/);
+    assert.match(out, /xdg[\/\\]pi-outpost[\/\\]config\.json/);
   });
 
   test("finds the user-level config when the directory has none", async () => {
@@ -160,7 +160,7 @@ describe("configuration: discovery, precedence, profiles", () => {
     // A local config exists too — the profile is explicit, so it must win
     const { out } = await cli(["config", "--profile", "work"], { cwd: dir, env: { XDG_CONFIG_HOME: xdg } });
     const config = resolved(out);
-    assert.match(config.configFile, /profiles\/work\.json$/);
+    assert.match(config.configFile, /profiles[\/\\]work\.json$/);
     assert.equal(config.port, 4006);
   });
 
@@ -287,7 +287,7 @@ describe("configuration: discovery, precedence, profiles", () => {
 
     const init = await cli(["init", "--global"], { cwd: elsewhere, env: { XDG_CONFIG_HOME: home } });
     assert.equal(init.code, 0);
-    assert.match(init.out, /global-xdg\/pi-outpost\/config\.json/);
+    assert.match(init.out, /global-xdg[\/\\]pi-outpost[\/\\]config\.json/);
 
     const { out } = await cli(["config"], { cwd: elsewhere, env: { XDG_CONFIG_HOME: home } });
     const config = resolved(out);
@@ -303,7 +303,7 @@ describe("configuration: discovery, precedence, profiles", () => {
 
     const init = await cli(["init"], { cwd: fresh, env: { XDG_CONFIG_HOME: xdg } });
     assert.equal(init.code, 0);
-    assert.match(init.out, /wrote .*fresh\/pi-outpost\.config\.json/);
+    assert.match(init.out, /wrote .*fresh[\/\\]pi-outpost\.config\.json/);
 
     const { code, out } = await cli(["config"], { cwd: fresh, env: { XDG_CONFIG_HOME: xdg } });
     assert.equal(code, 0);
