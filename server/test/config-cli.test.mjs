@@ -15,6 +15,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import process from "node:process";
 import { after, before, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -23,14 +24,28 @@ const run = promisify(execFile);
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENTRY = path.join(SERVER_DIR, "src", "index.ts");
 const TSX = path.join(SERVER_DIR, "..", "node_modules", ".bin", "tsx");
+const isWindows = process.platform === "win32";
+
+/**
+ * Resolve the command and args to run a TypeScript file via tsx.
+ * On Windows, execFile cannot run `.cmd` wrappers directly, so we use
+ * `node --import=tsx/esm` (same pattern as the test harness).
+ */
+function commandArgs(entryArgs) {
+  if (isWindows) {
+    return [process.execPath, ["--import=tsx/esm", ENTRY, ...entryArgs]];
+  }
+  return [TSX, [ENTRY, ...entryArgs]];
+}
 
 /**
  * Run the CLI and return what the user would see. Never throws on a non-zero exit —
  * refusing to start *is* the expected outcome of half these cases.
  */
 async function cli(args, { cwd, env = {} } = {}) {
+  const [cmd, cmdArgs] = commandArgs(args);
   try {
-    const { stdout, stderr } = await run(TSX, [ENTRY, ...args], {
+    const { stdout, stderr } = await run(cmd, cmdArgs, {
       cwd,
       // None of these commands serve — but a bug that made one of them hang must
       // fail the test, not the job (a test with no timeout froze CI for 19 minutes)

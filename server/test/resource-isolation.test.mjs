@@ -12,10 +12,11 @@ import { cp, mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { connect, startServer, makeWorkspace, freePort } from "./harness.mjs";
 
 const FIXTURES = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "fixtures",
 );
 
