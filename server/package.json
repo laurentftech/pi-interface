@@ -12,7 +12,7 @@
     "test:live": "node --test --test-timeout=180000 test/live/*.test.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-coding-agent": "^0.80.7",
     "@fastify/static": "^9.3.0",
     "@fastify/websocket": "^11.0.2",
     "@pi-outpost/shared": "*",
