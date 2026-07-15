@@ -66,8 +66,14 @@ export interface AppConfig {
   tools?: string[];
   /** Skip loading extensions entirely. */
   noExtensions: boolean;
-  /** Explicit extension paths to load (in addition to defaults). */
-  extensionPaths: string[];
+  /**
+   * Extension script paths loaded at runtime via import(). Works in both dev
+   * mode and bundled builds (esbuild preserves dynamic import()). Files must
+   * be .mjs (or .ts in dev mode with tsx).
+   *
+   * Each script must default-export an ExtensionFactory function.
+   */
+  extensionScripts: string[];
   /**
    * Skip loading skills entirely. Needed for real isolation even with a custom
    * agentDir: skills also auto-load from ~/.agents/skills (hardcoded to the real
@@ -261,7 +267,7 @@ export function loadConfig(
     configFile: filePath,
     cwd: launchDir,
     noExtensions: false,
-    extensionPaths: [],
+    extensionScripts: [],
     noSkills: false,
     skillPaths: [],
     noPromptTemplates: false,
@@ -339,7 +345,7 @@ export function loadConfig(
 
   config.tools = optionalStringArray(raw, "tools");
   config.noExtensions = optionalBoolean(raw, "noExtensions", false);
-  config.extensionPaths = (optionalStringArray(raw, "extensionPaths") ?? []).map(resolve);
+  config.extensionScripts = (optionalStringArray(raw, "extensionScripts") ?? []).map(resolve);
   config.noSkills = optionalBoolean(raw, "noSkills", false);
   config.skillPaths = (optionalStringArray(raw, "skillPaths") ?? []).map(resolve);
   config.noPromptTemplates = optionalBoolean(raw, "noPromptTemplates", false);

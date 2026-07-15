@@ -12,7 +12,7 @@ dist/
 .claude/settings.local.json
 
 # Local test config (personal): the agent's workspace, its own agentDir, its writable zone
-pi-outpost.config.json
+/pi-outpost.config.json
 .pi-outpost-test-agent/
 scratch/
 

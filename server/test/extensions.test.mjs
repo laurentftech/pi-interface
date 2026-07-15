@@ -1,5 +1,5 @@
 /**
- * Test: noExtensions + extensionPaths isolation.
+ * Test: noExtensions + extensionScripts isolation.
  * Boots a server with noExtensions:true, checks that global packages
  * (from ~/.pi/agent/settings.json) are NOT loaded.
  */
@@ -20,7 +20,7 @@ try {
 
   const server = await startServer(root, {
     noExtensions: true,
-    extensionPaths: [path.join(root, "my-ext", "index.ts")],
+    extensionScripts: [path.join(root, "my-ext", "index.ts")],
     // noSkills already set by harness; override noPromptTemplates
     noPromptTemplates: true,
   });

@@ -10,15 +10,39 @@ loading), but the final Windows-only steps (injecting into a real `node.exe`,
 code-signing) haven't been — verify on a real Windows machine before
 distributing.
 
-## Known limitation: `pi-outpost.config.json`'s `extensionPaths` doesn't work
+## Extension loading with the SEA build
 
-Extensions loaded via `extensionPaths` are loaded dynamically at runtime by
-the SDK's `jiti`-based loader. That does not survive being bundled into a
-single file — confirmed by testing: the bundled server starts fine, no error
-is printed, but the extension silently registers zero commands.
+The `extensionScripts` config key loads `.mjs` files at runtime via native
+`import()`, which esbuild preserves in bundled output:
 
-**Fix**: add extensions as static imports in `server/src/sea-extensions.ts`
-instead:
+```json
+{
+  "noExtensions": true,
+  "extensionScripts": ["./my-extension.mjs"]
+}
+```
+
+Each file must default-export an `ExtensionFactory`:
+
+```js
+export default (pi) => {
+  pi.registerCommand("hello", {
+    description: "Say hello",
+    handler: async (args, ctx) => {
+      ctx.ui.notify("Hello!", "info");
+    },
+  });
+};
+```
+
+Paths are resolved relative to the config file's directory, same as every
+other relative path in the config.
+
+### Static imports at build time (`src/sea-extensions.ts`)
+
+For extensions that should be baked into the bundle itself (no external file
+to deploy alongside the binary), add them as static imports in
+`server/src/sea-extensions.ts`:
 
 ```ts
 import myExtension from "../extensions/my-extension.ts";
@@ -26,17 +50,13 @@ import myExtension from "../extensions/my-extension.ts";
 export const seaExtensionFactories: ExtensionFactory[] = [myExtension];
 ```
 
-This goes through the SDK's `resourceLoaderOptions.extensionFactories`
-instead of `additionalExtensionPaths` — the SDK calls the function directly,
-no dynamic loading involved, so esbuild can bundle it like any other import.
-The tradeoff: the set of extensions is fixed at build time (a real static
-`import` needs a literal path) — no dropping new extension files in after
-packaging. For a fixed Windows build handed to end users, that's normally
-what you want anyway.
+This goes through the SDK's `extensionFactories` instead of `import()` — no
+dynamic loading, so esbuild bundles it like any other import. The tradeoff:
+the set of extensions is fixed at build time.
 
 `sea-extensions.ts` is empty by default and has no effect on the normal
-`npm run dev` / `npm run start` flow, which still reads `extensionPaths`
-from config as usual.
+`npm run dev` / `npm run start` flow, which reads `extensionScripts` from
+config as usual.
 
 ## Also worth knowing
 

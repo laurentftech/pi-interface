@@ -8,7 +8,7 @@
     "allowBash": false
   },
   "noExtensions": true,
-  "extensionPaths": ["./mon-ext/index.ts"],
+  "extensionScripts": ["./mon-ext/index.mjs"],
   "noSkills": true,
   "noPromptTemplates": true,
   "webContext": false,
@@ -18,7 +18,7 @@
   },
   "branding": {
     "title": "Pi-Outpost Demo",
-    "welcome": "Extension demo with relative path 👋",
+    "welcome": "Extension demo with extensionScripts 👋",
     "accentColor": "#0ea5e9"
   }
 }

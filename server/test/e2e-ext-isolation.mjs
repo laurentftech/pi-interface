@@ -35,7 +35,7 @@ try {
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
-    extensionPaths: ["./extensions/hello-ext.ts", "./extensions/tool-ext.ts"],
+    extensionScripts: ["./extensions/hello-ext.ts", "./extensions/tool-ext.ts"],
   });
 
   const ws = connect(server.wsUrl());

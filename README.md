@@ -180,7 +180,8 @@ See [`pi-outpost.config.example.json`](pi-outpost.config.example.json).
 | `sandbox.writableRoot` | Read-write zone: subdirectory of `root` that edit/write are further confined to. Must be inside `root`. Defaults to `root` itself |
 | `sandbox.allowBash` | Adds bash — **not path-confined**, explicit opt-in (default `false`) |
 | `tools` | Tool allowlist in non-sandbox mode, e.g. `["read","grep","find","ls"]` |
-| `noExtensions` / `extensionPaths` | Disable extension discovery / load only listed extensions |
+| `noExtensions` | Disable extension discovery entirely |
+| `extensionScripts` | Extension `.mjs` files loaded at runtime via `import()` — works in dev mode and the npm-published bundle. Each file must default-export an `ExtensionFactory`. Paths are resolved relative to the config file's directory |
 | `noSkills` | Disable skill discovery entirely. Needed for real isolation: even with a custom `agentDir`, skills also auto-load from `~/.agents/skills` (hardcoded to the real home directory) and from `.agents/skills` walked up from `cwd` to the git root — neither is scoped by `agentDir` |
 | `noPromptTemplates` | Disable prompt template auto-discovery entirely (both `agentDir` and the project's `cwd/.pi/prompts`). Relevant when `cwd` points at a real project: it doubles as a resource-discovery root, so that project's own prompt templates load too unless disabled |
 | `promptPaths` | Explicit prompt template directories to load (in addition to auto-discovered ones). Paths are resolved relative to the config file's directory |

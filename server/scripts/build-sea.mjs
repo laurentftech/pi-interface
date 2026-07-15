@@ -2,9 +2,9 @@
 /**
  * Builds a Node SEA (Single Executable Application) blob for pi-outpost's
  * server, for distribution as a standalone Windows .exe. See
- * docs/sea-packaging.md for the full walkthrough, including why extensions
- * must go through sea-extensions.ts instead of pi-outpost.config.json's
- * extensionPaths, and the Windows-only steps this script can't do for you.
+ * docs/sea-packaging.md for the full walkthrough, including extension loading
+ * (config.extensionScripts vs sea-extensions.ts) and the Windows-only steps
+ * this script can't do for you.
  *
  * Output layout (server/dist/), mirroring server/src/'s depth so the server's
  * existing `path.resolve(import.meta.dirname, "../../web/dist")` keeps
@@ -71,10 +71,10 @@ console.log(`
   ${BUNDLE_PATH}
   ${BLOB_PATH}
 
-Known limitation (see docs/sea-packaging.md): extensions loaded via
-pi-outpost.config.json's "extensionPaths" do NOT work once bundled — add
-them as static imports in server/src/sea-extensions.ts instead, then re-run
-this script.
+Extension loading (see docs/sea-packaging.md): use config.extensionScripts
+for runtime-loaded .mjs extensions; add static imports in
+server/src/sea-extensions.ts for extensions baked into the bundle.
+Re-run this script after any change to sea-extensions.ts.
 
 Remaining steps happen on Windows (this script can only prepare the blob):
   1. Copy a Windows node.exe (same major version as this build) to pi-outpost.exe

@@ -37,6 +37,7 @@ import {
   type WireImage,
 } from "@pi-outpost/shared";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { CliError, helpText, parseCli, readSecret, runInit } from "./cli.ts";
 import { loadConfig, NoConfigError } from "./config.ts";
 import {
@@ -403,14 +404,23 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
     ...(config.webContext ? [WEB_UI_CONTEXT] : []),
     ...config.appendSystemPrompt,
   ];
+
+  const extraFactories = [...seaExtensionFactories];
+  for (const scriptPath of config.extensionScripts) {
+    try {
+      const mod = await import(pathToFileURL(scriptPath).href);
+      const factory = mod.default ?? mod;
+      if (typeof factory === "function") extraFactories.push(factory);
+    } catch (err) {
+      console.error(`[config] failed to load extension script: ${scriptPath}`, err);
+    }
+  }
+
   const services = await createAgentSessionServices({
     cwd,
     agentDir: config.agentDir,
     resourceLoaderOptions: {
       ...(config.noExtensions ? { noExtensions: true } : {}),
-      ...(config.extensionPaths.length > 0
-        ? { additionalExtensionPaths: config.extensionPaths }
-        : {}),
       ...(config.noSkills ? { noSkills: true } : {}),
       ...(config.skillPaths.length > 0
         ? { additionalSkillPaths: config.skillPaths }
@@ -421,7 +431,7 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
         : {}),
       ...(config.systemPrompt !== undefined ? { systemPrompt: config.systemPrompt } : {}),
       ...(appendSystemPrompt.length > 0 ? { appendSystemPrompt } : {}),
-      ...(seaExtensionFactories.length > 0 ? { extensionFactories: seaExtensionFactories } : {}),
+      ...(extraFactories.length > 0 ? { extensionFactories: extraFactories } : {}),
     },
   });
   return {
