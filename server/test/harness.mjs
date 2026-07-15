@@ -15,10 +15,9 @@ const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const ENTRY = path.join(SERVER_DIR, "src", "index.ts");
 // The binary itself, not `npx tsx`: one less process between us and the server, and
 // one less wrapper that swallows the signal meant for it.
-const TSX =
-  process.platform === "win32"
-    ? path.join(SERVER_DIR, "..", "node_modules", ".bin", "tsx.cmd")
-    : path.join(SERVER_DIR, "..", "node_modules", ".bin", "tsx");
+// Use node directly with a loader flag instead of the tsx binary; the .cmd
+// wrapper on Windows combined with `detached: true` produces spawn EINVAL.
+const TSX_LOADER = "--import=tsx/esm";
 
 /** Ports are per-suite so suites can run in parallel without colliding with a dev server. */
 let nextPort = 3400 + Math.floor(Math.random() * 200);
@@ -75,7 +74,7 @@ export async function startServer(root, config = {}, options = {}) {
     else env[key] = value;
   }
 
-  const child = spawn(TSX, [ENTRY], {
+  const child = spawn(process.execPath, [TSX_LOADER, ENTRY], {
     cwd: SERVER_DIR,
     env,
     stdio: ["ignore", "pipe", "pipe"],
