@@ -75,6 +75,8 @@ export interface AppConfig {
    * the git root — neither is scoped by agentDir.
    */
   noSkills: boolean;
+  /** Explicit skill paths to load (SKILL.md files or skill directories). */
+  skillPaths: string[];
   /**
    * Skip auto-discovering prompt templates entirely (both agentDir and the
    * project's cwd/.pi/prompts). Like noSkills, cwd doubles as both the
@@ -82,6 +84,8 @@ export interface AppConfig {
    * cwd at a real project pulls in that project's .pi/prompts too.
    */
   noPromptTemplates: boolean;
+  /** Explicit prompt template paths (.md files or directories). */
+  promptPaths: string[];
   /**
    * Restrict the model switcher to exactly these provider/id pairs. Without
    * this, it lists every built-in model whose provider has configured auth —
@@ -259,7 +263,9 @@ export function loadConfig(
     noExtensions: false,
     extensionPaths: [],
     noSkills: false,
+    skillPaths: [],
     noPromptTemplates: false,
+    promptPaths: [],
     appendSystemPrompt: [],
     webContext: true,
     port: 3141,
@@ -335,7 +341,9 @@ export function loadConfig(
   config.noExtensions = optionalBoolean(raw, "noExtensions", false);
   config.extensionPaths = (optionalStringArray(raw, "extensionPaths") ?? []).map(resolve);
   config.noSkills = optionalBoolean(raw, "noSkills", false);
+  config.skillPaths = (optionalStringArray(raw, "skillPaths") ?? []).map(resolve);
   config.noPromptTemplates = optionalBoolean(raw, "noPromptTemplates", false);
+  config.promptPaths = (optionalStringArray(raw, "promptPaths") ?? []).map(resolve);
   config.allowedModels = optionalModelList(raw, "allowedModels");
 
   const systemPrompt = optionalString(raw, "systemPrompt");

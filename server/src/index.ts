@@ -412,7 +412,13 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
         ? { additionalExtensionPaths: config.extensionPaths }
         : {}),
       ...(config.noSkills ? { noSkills: true } : {}),
+      ...(config.skillPaths.length > 0
+        ? { additionalSkillPaths: config.skillPaths }
+        : {}),
       ...(config.noPromptTemplates ? { noPromptTemplates: true } : {}),
+      ...(config.promptPaths.length > 0
+        ? { additionalPromptTemplatePaths: config.promptPaths }
+        : {}),
       ...(config.systemPrompt !== undefined ? { systemPrompt: config.systemPrompt } : {}),
       ...(appendSystemPrompt.length > 0 ? { appendSystemPrompt } : {}),
       ...(seaExtensionFactories.length > 0 ? { extensionFactories: seaExtensionFactories } : {}),

@@ -10,6 +10,7 @@
   "noExtensions": true,
   "extensionPaths": [],
   "noSkills": true,
+  "skillPaths": [],
   "noPromptTemplates": true,
   "webContext": true,
   "allowedModels": [{ "provider": "anthropic", "id": "claude-sonnet-5" }],
