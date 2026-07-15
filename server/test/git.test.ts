@@ -43,7 +43,7 @@ describe("git operations", () => {
   let root: string;
 
   function git(...args: string[]) {
-    execFileSync("git", args, { cwd: root, shell: process.platform === "win32" });
+    execFileSync("git", args, { cwd: root });
   }
 
   function write(relPath: string, content: string) {
