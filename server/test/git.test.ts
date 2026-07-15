@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, existsSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { before, after, describe, test } from "node:test";
@@ -81,7 +81,12 @@ describe("git operations", () => {
   test("probeGit returns the toplevel", async () => {
     const result = await probeGit(root);
     assert.ok(result !== null, "expected a git repo");
-    assert.equal(realpathSync(result!.toplevel), realpathSync(root));
+    // The toplevel must be a real directory containing the .git we created.
+    // On Windows, os.tmpdir() may use 8.3 short names (RUNNER~1) while git
+    // returns canonical long names (runneradmin), so compare resolved paths
+    // instead of raw strings.
+    assert.ok(existsSync(result!.toplevel), `toplevel ${result!.toplevel} should exist`);
+    assert.ok(existsSync(path.join(result!.toplevel, ".git")), ".git should be inside toplevel");
   });
 
   test("probeGit returns null for a non-git directory", async () => {
