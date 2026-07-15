@@ -4,7 +4,7 @@
  * of these tests is the wiring (confinement, auth, session bookkeeping) that unit
  * tests of the pure functions cannot see.
  */
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,7 +15,10 @@ const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const ENTRY = path.join(SERVER_DIR, "src", "index.ts");
 // The binary itself, not `npx tsx`: one less process between us and the server, and
 // one less wrapper that swallows the signal meant for it.
-const TSX = path.join(SERVER_DIR, "..", "node_modules", ".bin", "tsx");
+const TSX =
+  process.platform === "win32"
+    ? path.join(SERVER_DIR, "..", "node_modules", ".bin", "tsx.cmd")
+    : path.join(SERVER_DIR, "..", "node_modules", ".bin", "tsx");
 
 /** Ports are per-suite so suites can run in parallel without colliding with a dev server. */
 let nextPort = 3400 + Math.floor(Math.random() * 200);
@@ -107,7 +110,11 @@ export async function startServer(root, config = {}, options = {}) {
       // process it spawns, so killing the child alone would orphan the server.
       const killGroup = (signal) => {
         try {
-          process.kill(-child.pid, signal);
+          if (process.platform === "win32") {
+            execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: "ignore" });
+          } else {
+            process.kill(-child.pid, signal);
+          }
         } catch {
           // already gone
         }
