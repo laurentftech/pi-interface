@@ -138,7 +138,7 @@ export function toSummary(info: SessionInfo, snippet?: string): SessionSummary {
 }
 
 /** Excerpt of the transcript around the match, so a hit shows *why* it matched. */
-function snippetAround(text: string, query: string): string | undefined {
+export function snippetAround(text: string, query: string): string | undefined {
   const at = text.toLowerCase().indexOf(query);
   if (at === -1) return undefined;
   // Never start past the match: a query longer than the window would otherwise

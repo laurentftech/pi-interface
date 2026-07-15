@@ -136,7 +136,7 @@ export class NoConfigError extends Error {
   }
 }
 
-function fail(message: string): never {
+export function fail(message: string): never {
   throw new Error(`[config] ${message}`);
 }
 
@@ -200,21 +200,21 @@ export function findConfigFile(
   return found;
 }
 
-function optionalString(raw: Record<string, unknown>, key: string): string | undefined {
+export function optionalString(raw: Record<string, unknown>, key: string): string | undefined {
   const value = raw[key];
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value === "") fail(`"${key}" must be a non-empty string`);
   return value;
 }
 
-function optionalBoolean(raw: Record<string, unknown>, key: string, fallback: boolean): boolean {
+export function optionalBoolean(raw: Record<string, unknown>, key: string, fallback: boolean): boolean {
   const value = raw[key];
   if (value === undefined) return fallback;
   if (typeof value !== "boolean") fail(`"${key}" must be a boolean`);
   return value;
 }
 
-function optionalStringArray(raw: Record<string, unknown>, key: string): string[] | undefined {
+export function optionalStringArray(raw: Record<string, unknown>, key: string): string[] | undefined {
   const value = raw[key];
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
@@ -223,7 +223,7 @@ function optionalStringArray(raw: Record<string, unknown>, key: string): string[
   return value as string[];
 }
 
-function optionalModelList(
+export function optionalModelList(
   raw: Record<string, unknown>,
   key: string,
 ): { provider: string; id: string }[] | undefined {
@@ -239,7 +239,7 @@ function optionalModelList(
   });
 }
 
-function asObject(value: unknown, key: string): Record<string, unknown> {
+export function asObject(value: unknown, key: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     fail(`"${key}" must be an object`);
   }
@@ -422,7 +422,7 @@ const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
  * to hand an unauthenticated LAN the agent. Now that `--host` and PI_OUTPOST_HOST
  * exist, that address is one word away; the token stops being advice.
  */
-function requireTokenOffLoopback(config: AppConfig): void {
+export function requireTokenOffLoopback(config: AppConfig): void {
   if (LOOPBACK.has(config.host) || config.token) return;
   fail(
     `refusing to listen on ${config.host} without an auth token: the agent's tools would be ` +
@@ -440,7 +440,7 @@ function requireTokenOffLoopback(config: AppConfig): void {
  * user types; paths *inside* a config file resolve against that file, which is why
  * these do not go through the file's `resolve`.
  */
-function applyDirectories(config: AppConfig, flags: CliOptions, env: NodeJS.ProcessEnv): void {
+export function applyDirectories(config: AppConfig, flags: CliOptions, env: NodeJS.ProcessEnv): void {
   if (env.PI_OUTPOST_CWD) config.cwd = path.resolve(env.PI_OUTPOST_CWD);
   if (env.PI_OUTPOST_AGENT_DIR) config.agentDir = path.resolve(env.PI_OUTPOST_AGENT_DIR);
   if (flags.cwd !== undefined) config.cwd = path.resolve(flags.cwd);
@@ -454,7 +454,7 @@ function applyDirectories(config: AppConfig, flags: CliOptions, env: NodeJS.Proc
  * long-standing behaviour (the secret stays off disk) the rule, not an exception.
  * There is deliberately no token flag: argv is readable by any process listing.
  */
-function applyRuntime(config: AppConfig, flags: CliOptions, env: NodeJS.ProcessEnv): void {
+export function applyRuntime(config: AppConfig, flags: CliOptions, env: NodeJS.ProcessEnv): void {
   // Bare PORT is honoured too: PaaS hosts inject it, and it costs one `??`.
   const port = env.PI_OUTPOST_PORT ?? env.PORT;
   if (port !== undefined && port !== "") {
