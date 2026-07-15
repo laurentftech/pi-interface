@@ -53,3 +53,7 @@ cached cross-module structure; otherwise carry on.
 For the MCP setup, ensure `openlore mcp` is configured as an MCP server.
 See https://github.com/clay-good/OpenLore for details.
 <!-- END OPENLORE -->
+
+## Tooling & CLI Constraints
+- ALWAYS use `rg` (ripgrep) instead of `grep` for code search and file inspection.
+- NEVER run recursive `grep -r` commands. `rg` is faster and respects `.gitignore`.

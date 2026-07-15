@@ -12,6 +12,7 @@
   "noSkills": true,
   "skillPaths": [],
   "noPromptTemplates": true,
+  "promptPaths": ["./my-prompts"],
   "webContext": true,
   "allowedModels": [{ "provider": "anthropic", "id": "claude-sonnet-5" }],
   "appendSystemPrompt": ["Only discuss topics related to this project."],

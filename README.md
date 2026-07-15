@@ -183,6 +183,7 @@ See [`pi-outpost.config.example.json`](pi-outpost.config.example.json).
 | `noExtensions` / `extensionPaths` | Disable extension discovery / load only listed extensions |
 | `noSkills` | Disable skill discovery entirely. Needed for real isolation: even with a custom `agentDir`, skills also auto-load from `~/.agents/skills` (hardcoded to the real home directory) and from `.agents/skills` walked up from `cwd` to the git root — neither is scoped by `agentDir` |
 | `noPromptTemplates` | Disable prompt template auto-discovery entirely (both `agentDir` and the project's `cwd/.pi/prompts`). Relevant when `cwd` points at a real project: it doubles as a resource-discovery root, so that project's own prompt templates load too unless disabled |
+| `promptPaths` | Explicit prompt template directories to load (in addition to auto-discovered ones). Paths are resolved relative to the config file's directory |
 | `allowedModels` | Restrict the model switcher to these `{ "provider", "id" }` pairs. Without it, every built-in model whose provider has configured auth is listed — often more variants than a given deployment (e.g. an air-gapped internal endpoint) actually serves |
 | `systemPrompt` / `systemPromptFile` | Replace pi's built-in system prompt entirely (mutually exclusive; `systemPromptFile` is a path to a text file). Project context files, skills, and `appendSystemPrompt` are still layered on top |
 | `appendSystemPrompt` | Array of extra paragraphs appended after the (built-in or custom) system prompt |

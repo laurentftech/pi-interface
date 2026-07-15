@@ -64,6 +64,7 @@ Server configuration loaded from `pi-outpost.config.json` (or the file named by 
 | extensionPaths | string[] | Explicit extension paths to load |
 | noSkills | boolean | Skip loading skills (needed for real isolation; skills also auto-load from the home directory) |
 | noPromptTemplates | boolean | Skip auto-discovering prompt templates |
+| promptPaths | string[] | Explicit prompt template directories to load (resolved relative to the config file) |
 | allowedModels | {provider, id}[]? | Restrict the model switcher to these pairs |
 | systemPrompt | string? | Replace pi's built-in system prompt entirely |
 | appendSystemPrompt | string[] | Extra paragraphs appended to the system prompt |
