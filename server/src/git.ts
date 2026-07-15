@@ -51,7 +51,7 @@ export async function probeGit(root: string): Promise<{ toplevel: string } | nul
  * Undo git's C-style path quoting (core.quotePath quotes any non-ASCII byte as
  * \NNN octal — accented filenames are the everyday case, not the exception).
  */
-function unquote(gitPath: string): string {
+export function unquote(gitPath: string): string {
   if (!gitPath.startsWith('"') || !gitPath.endsWith('"')) return gitPath;
   const inner = gitPath.slice(1, -1);
   const bytes: number[] = [];
