@@ -26,14 +26,17 @@ const ENTRY = path.join(SERVER_DIR, "src", "index.ts");
 const TSX = path.join(SERVER_DIR, "..", "node_modules", ".bin", "tsx");
 const isWindows = process.platform === "win32";
 
+// Absolute path to tsx ESM loader so --import works regardless of CWD
+const TSX_LOADER = path.join(SERVER_DIR, "..", "node_modules", "tsx", "dist", "esm", "index.mjs");
+
 /**
  * Resolve the command and args to run a TypeScript file via tsx.
  * On Windows, execFile cannot run `.cmd` wrappers directly, so we use
- * `node --import=tsx/esm` (same pattern as the test harness).
+ * `node --import=<abs-path-to-tsx-loader>` (same pattern as the test harness).
  */
 function commandArgs(entryArgs) {
   if (isWindows) {
-    return [process.execPath, ["--import=tsx/esm", ENTRY, ...entryArgs]];
+    return [process.execPath, [`--import=${TSX_LOADER}`, ENTRY, ...entryArgs]];
   }
   return [TSX, [ENTRY, ...entryArgs]];
 }
