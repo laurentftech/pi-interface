@@ -4,11 +4,18 @@ Node's [Single Executable Applications](https://nodejs.org/api/single-executable
 (SEA) feature bundles the server into one `.exe` with the Node runtime baked
 in — end users need nothing installed, no `npm install`, no terminal.
 
-This is **experimental** and has one confirmed limitation (below). It was
-validated end-to-end in this repo (bundle → blob → run, including extension
-loading), but the final Windows-only steps (injecting into a real `node.exe`,
-code-signing) haven't been — verify on a real Windows machine before
-distributing.
+> **Requires Node ≥ 26** (for `--build-sea` + `mainFormat: "module"` support).
+> On Node 24, the SEA loader only runs injected scripts as CJS (`embedderRunCjs`)
+> and doesn't support `mainFormat`. The repo's CI uses Node 26 for the SEA build
+> step; development on older Node works fine via `npm run dev` / `npm run start`.
+
+## How it works
+
+The build server `server/scripts/build-sea.mjs` does three things:
+
+1. **Bundles** `server/src/index.ts` via esbuild into one ESM file (`bundle.mjs`).
+2. **Generates a cross-platform blob** (`sea-prep.blob`) via `--experimental-sea-config` — this can be injected into a `node.exe` on any platform.
+3. **On Windows only** (skipped in CI), builds a native `.exe` via `--build-sea` with `mainFormat: "module"`, so the bundle runs as ESM inside the blob.
 
 ## Extension loading with the SEA build
 
@@ -66,32 +73,35 @@ config as usual.
 ## Also worth knowing
 
 `pi`'s own self-referential docs (answering questions about pi's SDK,
-extensions, etc. — see the default system prompt) read `README.md`/`docs/`/
+extensions, etc. — see the default system prompt) read `README.md`/`docs`/
 `examples/` from the SDK's package directory, resolved relative to the
 *bundled* file's location once packaged. Those files aren't shipped by
 default, so that specific feature silently stops working — harmless unless
 you rely on it. Fixable by setting `PI_PACKAGE_DIR` (env var, read by the
 SDK) to wherever you copy `node_modules/@earendil-works/pi-coding-agent`'s
-`README.md`/`docs/`/`examples/` alongside the executable, if you need it.
+`README.md`/`docs`/`examples/` alongside the executable, if you need it.
 
-## Build the blob
+## Build
 
 ```bash
 npm run build --workspace web   # produces web/dist
 npm run build:sea --workspace server
 ```
 
-Produces, in `server/dist/`:
-- `bundle.js` — the whole server in one file, no `node_modules` needed at runtime
-- `sea-prep.blob` — Node's SEA blob, ready to inject
+With Node ≥ 26, produces in `server/dist/`:
+- `bundle.mjs` — the whole server in one ESM file, no `node_modules` needed
+- `sea-prep.blob` — cross-platform SEA blob (for npm distribution / manual injection)
+- `pi-outpost.exe` — **Windows only**, generated via `--build-sea`
 
-## Remaining steps (Windows only — not done by the script above)
+## Using the cross-platform blob (any platform)
+
+Inject the blob into a copy of the Node binary:
 
 ```powershell
 # 1. Start from a real Windows node.exe (same major version used to build the blob)
 copy "C:\path\to\node.exe" pi-outpost.exe
 
-# 2. Inject the blob (requires the `postject` npm package)
+# 2. Inject the blob
 npx postject pi-outpost.exe NODE_SEA_BLOB server\dist\sea-prep.blob ^
   --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 ^
   --overwrite
@@ -102,8 +112,11 @@ npx postject pi-outpost.exe NODE_SEA_BLOB server\dist\sea-prep.blob ^
 signtool sign /fd SHA256 pi-outpost.exe
 ```
 
-Then lay out the final folder so the server's existing static-file resolution
-(`../../web/dist` relative to where the bundle lives) keeps working:
+## Using the native .exe (Windows only)
+
+The `--build-sea` step produces a fully standalone `.exe` — no injection needed.
+Lay out the folder so the server's static-file resolution (`../../web/dist`)
+keeps working:
 
 ```
 pi-outpost\

@@ -63,14 +63,14 @@ jobs:
       - run: npm test --workspace server
       - run: npm run build
 
-      # BASCULE vers Node 24 spécifiquement pour le build du blob (SEA)
-      - name: Setup Node 24 for SEA build
+      # BASCULE vers Node 26 pour le build du blob SEA (--build-sea + mainFormat:module)
+      - name: Setup Node 26 for SEA build
         uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
 
-      # Build the blob SEA (en Node 24)
+      # Build the SEA blob (Node 26, --experimental-sea-config pour le blob cross-platform)
       - run: npm run build:sea --workspace server
 
       # Copy the SEA blob into the npm package so it ships with cli/dist/

@@ -406,23 +406,20 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   ];
 
   const extraFactories = [...seaExtensionFactories];
-  for (const scriptPath of config.extensionScripts) {
-    try {
-      const mod = await import(pathToFileURL(scriptPath).href);
-      const factory = mod.default ?? mod;
-      if (typeof factory === "function") extraFactories.push(factory);
-    } catch (err) {
-      console.error(`[config] failed to load extension script: ${scriptPath}`, err);
-    }
-  }
-
+  // extensionScripts are loaded via the SDK's jiti-based loader (same as
+  // extensionPaths), which uses createRequire under the hood — this works
+  // inside SEA blobs where native import() can only resolve built-in modules.
+  const allExtPaths = [
+    ...config.extensionPaths,
+    ...config.extensionScripts,
+  ];
   const services = await createAgentSessionServices({
     cwd,
     agentDir: config.agentDir,
     resourceLoaderOptions: {
       ...(config.noExtensions ? { noExtensions: true } : {}),
-      ...(config.extensionPaths.length > 0
-        ? { additionalExtensionPaths: config.extensionPaths }
+      ...(allExtPaths.length > 0
+        ? { additionalExtensionPaths: allExtPaths }
         : {}),
       ...(config.noSkills ? { noSkills: true } : {}),
       ...(config.skillPaths.length > 0
