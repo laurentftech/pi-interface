@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
 
@@ -64,12 +64,16 @@ jobs:
       - run: npm test --workspace server
       - run: npm run build
 
+      # Build the blob SEA
+      - run: npm run build:sea --workspace server
+      
       # prepack rebuilds each package from this clean checkout, so what ships is what
       # was just tested — never a stale dist/ from someone's machine.
       #
       # No credential here on purpose: npm authenticates with the OIDC token above,
       # against the trusted publisher registered for each package. `--provenance` is
       # not passed either — trusted publishing attests it on its own.
+            
       - name: Publish
         run: |
           for pkg in ${{ steps.plan.outputs.publish }}; do
