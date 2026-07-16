@@ -12,8 +12,4 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
  * Empty by default: has no effect on the normal `npm run dev` / `npm run start`
  * flow, which reads config.extensionScripts as usual.
  */
-import monExt from "../../interactive-test/mon-ext/index.ts";
-
-export const seaExtensionFactories: ExtensionFactory[] = [
-  monExt as unknown as ExtensionFactory,
-];
+export const seaExtensionFactories: ExtensionFactory[] = [];
