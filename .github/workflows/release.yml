@@ -72,6 +72,9 @@ jobs:
 
       # Build the blob SEA (en Node 24)
       - run: npm run build:sea --workspace server
+
+      # Copy the SEA blob into the npm package so it ships with cli/dist/
+      - run: cp server/dist/sea-prep.blob cli/dist/sea-prep.blob
       
       # Le publish peut se faire en Node 24 sans problème
       - name: Publish
