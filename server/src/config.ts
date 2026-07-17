@@ -51,6 +51,14 @@ export interface SandboxConfig {
    * turning it on effectively disables the file sandbox. Explicit opt-in only.
    */
   allowBash: boolean;
+  /**
+   * Extra directories (absolute paths) that read tools (read/ls/grep/find) are
+   * allowed to access in addition to `root`. Write tools are NOT affected — these
+   * are read-only exceptions. Populated from `skillPaths`, `promptPaths`,
+   * `extensionPaths` and `extensionScripts` so the agent can read files stored
+   * outside the sandbox root.
+   */
+  readExceptions: string[];
 }
 
 export interface AppConfig {
@@ -337,6 +345,12 @@ export function loadConfig(
       allowWrite,
       writableRoot: resolvedWritableRoot,
       allowBash,
+      readExceptions: [
+        ...(optionalStringArray(raw, "skillPaths") ?? []).map(resolve),
+        ...(optionalStringArray(raw, "promptPaths") ?? []).map(resolve),
+        ...(optionalStringArray(raw, "extensionPaths") ?? []).map(resolve),
+        ...(optionalStringArray(raw, "extensionScripts") ?? []).map(resolve),
+      ],
     };
     if (!fs.existsSync(config.sandbox.root)) {
       fail(`sandbox.root does not exist: ${config.sandbox.root}`);

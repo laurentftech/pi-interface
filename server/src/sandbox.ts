@@ -48,20 +48,39 @@ export function isWithin(root: string, target: string): boolean {
 }
 
 /**
+ * Check whether `target` lies inside at least one of the given `roots`.
+ * Returns true if any root contains the target.
+ */
+export function isWithinAny(roots: string[], target: string): boolean {
+  return roots.some((root) => isWithin(root, target));
+}
+
+/**
  * Wrap `def` so every `path` argument — resolved relative to `cwd`, symlinks
  * included — must land inside `allowedRoot`. `cwd` is always the sandbox root
  * (paths the model sees are relative to it); `allowedRoot` is the zone this
  * particular tool is confined to (the full root for read tools, `writableRoot`
  * for edit/write).
+ *
+ * When `readExceptions` is provided, read tools additionally allow paths
+ * inside any of those directories — useful for skill/prompt directories
+ * that live outside the sandbox root.
  */
-function scopeToRoot(def: ToolDefinition, cwd: string, allowedRoot: string): ToolDefinition {
+function scopeToRoot(
+  def: ToolDefinition,
+  cwd: string,
+  allowedRoot: string,
+  readExceptions?: string[],
+): ToolDefinition {
   return {
     ...def,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const target = (params as { path?: unknown }).path;
       if (typeof target === "string" && target !== "") {
         const resolved = await realResolve(path.resolve(cwd, target));
-        if (!isWithin(allowedRoot, resolved)) {
+        const inAllowed = isWithin(allowedRoot, resolved);
+        const inException = readExceptions && isWithinAny(readExceptions, resolved);
+        if (!inAllowed && !inException) {
           throw new Error(`Access denied: "${target}" is outside the sandbox (${allowedRoot})`);
         }
       }
@@ -82,7 +101,13 @@ export async function createSandboxedTools(sandbox: SandboxConfig): Promise<Tool
     (cwd) => createGrepToolDefinition(cwd) as ToolDefinition,
     (cwd) => createFindToolDefinition(cwd) as ToolDefinition,
   ];
-  const tools = readFactories.map((create) => scopeToRoot(create(realRoot), realRoot, realRoot));
+  const readExceptions: string[] | undefined =
+    sandbox.readExceptions.length > 0
+      ? await Promise.all(sandbox.readExceptions.map((p) => fs.realpath(p).catch(() => p)))
+      : undefined;
+  const tools = readFactories.map((create) =>
+    scopeToRoot(create(realRoot), realRoot, realRoot, readExceptions),
+  );
 
   if (sandbox.allowWrite) {
     const realWritableRoot = sandbox.writableRoot ? await fs.realpath(sandbox.writableRoot) : realRoot;
