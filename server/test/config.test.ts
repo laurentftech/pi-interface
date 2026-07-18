@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, test } from "node:test";
 import {
@@ -12,6 +14,7 @@ import {
   applyRuntime,
   requireTokenOffLoopback,
   userConfigDir,
+  loadConfig,
 } from "../src/config.ts";
 import type { AppConfig, CliOptions } from "../src/config.ts";
 
@@ -387,5 +390,155 @@ describe("userConfigDir", () => {
     const suffix = path.sep + "pi-outpost";
     assert.ok(result.endsWith(suffix), `expected ...${suffix}, got ${result}`);
     assert.ok(!result.includes("xdg") || result.includes("XDG_CONFIG_HOME") === false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadConfig — relative path resolution
+// ---------------------------------------------------------------------------
+describe("loadConfig — resource path resolution", () => {
+  async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(path.join(tmpdir(), "pi-outpost-config-test-"));
+    try {
+      return await fn(dir);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("extensionPaths: relative paths resolve against config file dir", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await mkdir(path.join(dir, "ext"), { recursive: true });
+      await writeFile(
+        configPath,
+        JSON.stringify({ extensionPaths: ["./ext/my-ext.ts"] }, null, 2),
+      );
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.equal(cfg.extensionPaths.length, 1);
+      assert.equal(cfg.extensionPaths[0], path.resolve(dir, "ext", "my-ext.ts"));
+    });
+  });
+
+  test("extensionPaths: absolute paths stay unchanged", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      const absPath = path.join(dir, "abs-ext.ts");
+      await writeFile(absPath, "");
+      await writeFile(configPath, JSON.stringify({ extensionPaths: [absPath] }, null, 2));
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.equal(cfg.extensionPaths.length, 1);
+      assert.equal(cfg.extensionPaths[0], absPath);
+    });
+  });
+
+  test("extensionPaths: not set defaults to empty array", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await writeFile(configPath, JSON.stringify({}, null, 2));
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.deepEqual(cfg.extensionPaths, []);
+    });
+  });
+
+  test("skillPaths: relative paths resolve against config file dir", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await mkdir(path.join(dir, "skills"), { recursive: true });
+      await writeFile(
+        configPath,
+        JSON.stringify({ skillPaths: ["./skills/my-skill"] }, null, 2),
+      );
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.equal(cfg.skillPaths.length, 1);
+      assert.equal(cfg.skillPaths[0], path.resolve(dir, "skills", "my-skill"));
+    });
+  });
+
+  test("skillPaths: not set defaults to empty array", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await writeFile(configPath, JSON.stringify({}, null, 2));
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.deepEqual(cfg.skillPaths, []);
+    });
+  });
+
+  test("promptPaths: relative paths resolve against config file dir", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await mkdir(path.join(dir, "prompts"), { recursive: true });
+      await writeFile(
+        configPath,
+        JSON.stringify({ promptPaths: ["./prompts/my-prompt.md"] }, null, 2),
+      );
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.equal(cfg.promptPaths.length, 1);
+      assert.equal(cfg.promptPaths[0], path.resolve(dir, "prompts", "my-prompt.md"));
+    });
+  });
+
+  test("promptPaths: not set defaults to empty array", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await writeFile(configPath, JSON.stringify({}, null, 2));
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.deepEqual(cfg.promptPaths, []);
+    });
+  });
+
+  test("noExtensions defaults to false", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await writeFile(configPath, JSON.stringify({}, null, 2));
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.equal(cfg.noExtensions, false);
+    });
+  });
+
+  test("noSkills defaults to false", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await writeFile(configPath, JSON.stringify({}, null, 2));
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.equal(cfg.noSkills, false);
+    });
+  });
+
+  test("noPromptTemplates defaults to false", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await writeFile(configPath, JSON.stringify({}, null, 2));
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.equal(cfg.noPromptTemplates, false);
+    });
+  });
+
+  test("multiple path arrays resolve correctly together", async () => {
+    await withTempDir(async (dir) => {
+      const configPath = path.join(dir, "config.json");
+      await mkdir(path.join(dir, "ext"), { recursive: true });
+      await mkdir(path.join(dir, "sk"), { recursive: true });
+      await mkdir(path.join(dir, "pr"), { recursive: true });
+      await writeFile(
+        configPath,
+        JSON.stringify(
+          {
+            extensionPaths: ["./ext/a.ts", "./ext/b.ts"],
+            skillPaths: ["./sk/x"],
+            promptPaths: ["./pr/y.md"],
+          },
+          null,
+          2,
+        ),
+      );
+      const cfg = loadConfig(dir, { config: configPath });
+      assert.deepEqual(cfg.extensionPaths, [
+        path.resolve(dir, "ext", "a.ts"),
+        path.resolve(dir, "ext", "b.ts"),
+      ]);
+      assert.deepEqual(cfg.skillPaths, [path.resolve(dir, "sk", "x")]);
+      assert.deepEqual(cfg.promptPaths, [path.resolve(dir, "pr", "y.md")]);
+    });
   });
 });
