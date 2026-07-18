@@ -1097,6 +1097,7 @@ async function handleUpdateConfig(
       allowWrite: mergedSandbox.allowWrite,
       allowBash: mergedSandbox.allowBash,
       writableRoot: mergedSandbox.writableRoot,
+      readExceptions: config.sandbox?.readExceptions ?? [],
     };
     BROWSER_ROOT = await resolveBrowserRoot(config);
     WRITABLE_ROOT = await resolveWritableRoot(config, BROWSER_ROOT);
