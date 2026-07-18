@@ -59,6 +59,7 @@ jobs:
 
       # Tests et Lint en Node 22
       - run: npm run typecheck
+      - run: npm run build --workspace @pi-outpost/embed
       - run: npm run lint
       - run: npm test --workspace server
       - run: npm run build

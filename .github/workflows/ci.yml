@@ -22,6 +22,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run build --workspace @pi-outpost/embed
       - run: npm run lint
       - run: npm test --workspace server
         env:
