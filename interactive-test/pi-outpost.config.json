@@ -9,7 +9,8 @@
   },
   "noExtensions": true,
   "extensionPaths": ["./mon-ext/index.ts"],
-  "noSkills": true,
+  "noSkills": false,
+  "skillPaths": ["./skills"],
   "noPromptTemplates": true,
   "webContext": false,
   "server": {
