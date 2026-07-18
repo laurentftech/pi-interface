@@ -229,6 +229,8 @@ export interface SessionSnapshot {
   credentials?: CredentialStatus;
   /** Absolute paths of loaded extension files. */
   extensionPaths?: string[];
+  /** Package versions for the settings display. */
+  versions?: { piOutpost: string; piSdk: string };
   /** Sandbox configuration — absent when no sandbox is configured. */
   sandbox?: {
     root: string;

@@ -11,6 +11,7 @@ interface SandboxConfig {
 interface SettingsMenuProps {
   extensionPaths: string[];
   sandbox: SandboxConfig | null;
+  versions?: { piOutpost: string; piSdk: string } | null;
   onUpdateConfig: (sandbox: SandboxConfig) => void;
 }
 
@@ -26,7 +27,7 @@ function useClickOutside(onClose: () => void) {
   return ref;
 }
 
-export function SettingsMenu({ extensionPaths, sandbox, onUpdateConfig }: SettingsMenuProps) {
+export function SettingsMenu({ extensionPaths, sandbox, versions, onUpdateConfig }: SettingsMenuProps) {
   const [open, setOpen] = useState(false);
   const [sandboxRoot, setSandboxRoot] = useState("");
   const [sandboxWritableRoot, setSandboxWritableRoot] = useState("");
@@ -173,6 +174,23 @@ export function SettingsMenu({ extensionPaths, sandbox, onUpdateConfig }: Settin
             )}
             {!sandbox && (
               <p className="text-xs text-zinc-400 dark:text-zinc-500">No sandbox configured</p>
+            )}
+
+            {/* Versions section */}
+            {versions && (
+              <section className="mt-4">
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                  Versions
+                </h3>
+                <div className="space-y-1 text-xs text-zinc-600 dark:text-zinc-400">
+                  <p>
+                    pi-outpost: <span className="font-mono text-zinc-800 dark:text-zinc-200">{versions.piOutpost}</span>
+                  </p>
+                  <p>
+                    pi SDK: <span className="font-mono text-zinc-800 dark:text-zinc-200">{versions.piSdk}</span>
+                  </p>
+                </div>
+              </section>
             )}
           </div>
         </div>

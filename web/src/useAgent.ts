@@ -120,6 +120,7 @@ export interface AgentState {
   fileSearch: FileSearch | null;
   extensionPaths: string[];
   sandbox: { root: string; allowWrite: boolean; allowBash: boolean; writableRoot?: string } | null;
+  versions: { piOutpost: string; piSdk: string } | null;
   gitAvailable: boolean;
   gitStatus: GitStatusState | null;
   /** Worktree-vs-HEAD contents for the viewer's diff toggle. */
@@ -157,6 +158,7 @@ const initialState: AgentState = {
   fileSearch: null,
   extensionPaths: [],
   sandbox: null,
+  versions: null,
   gitAvailable: false,
   credentials: null,
   gitStatus: null,

@@ -20,6 +20,7 @@ import {
   getAgentDir,
   type SessionInfo,
   SessionManager,
+  VERSION as PI_SDK_VERSION,
 } from "@earendil-works/pi-coding-agent";
 import {
   type ClientMessage,
@@ -597,6 +598,7 @@ function snapshot(): SessionSnapshot {
     gitAvailable: GIT !== null,
     credentials: credentialStatus(),
     extensionPaths: session.extensionRunner.getExtensionPaths(),
+    versions: { piOutpost: VERSION, piSdk: PI_SDK_VERSION },
     sandbox: (() => {
       const v = config.sandbox
         ? {

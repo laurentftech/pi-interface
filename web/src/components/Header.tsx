@@ -26,6 +26,7 @@ interface HeaderProps {
   gitLog: GitLogEntry[] | null;
   extensionPaths: string[];
   sandbox: { root: string; allowWrite: boolean; allowBash: boolean; writableRoot?: string } | null;
+  versions?: { piOutpost: string; piSdk: string } | null;
   onUpdateConfig: (sandbox: { root: string; allowWrite: boolean; allowBash: boolean; writableRoot?: string }) => void;
   onToggleSidebar: () => void;
   onToggleHideTools: () => void;
@@ -380,6 +381,7 @@ export function Header(props: HeaderProps) {
         <SettingsMenu
           extensionPaths={props.extensionPaths}
           sandbox={props.sandbox}
+          versions={props.versions}
           onUpdateConfig={props.onUpdateConfig}
         />
         <span

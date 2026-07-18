@@ -348,6 +348,7 @@ const App = forwardRef<AppHandle, AppProps>(function App({ serverUrl = "", rootE
             gitLog={state.gitLog}
             extensionPaths={state.extensionPaths}
             sandbox={state.sandbox}
+            versions={state.versions}
             onUpdateConfig={updateConfig}
             onFetchGitLog={fetchGitLog}
             onShowCommit={fetchGitShow}
