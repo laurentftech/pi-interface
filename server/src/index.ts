@@ -20,7 +20,6 @@ import {
   getAgentDir,
   type SessionInfo,
   SessionManager,
-  VERSION as PI_SDK_VERSION,
 } from "@earendil-works/pi-coding-agent";
 import {
   type ClientMessage,
@@ -72,6 +71,12 @@ import { seaExtensionFactories } from "./sea-extensions.ts";
 // Replaced at bundle time; `typeof` on an undeclared name is safe, so a source run says "dev".
 declare const __PI_OUTPOST_VERSION__: string;
 const VERSION = typeof __PI_OUTPOST_VERSION__ === "string" ? __PI_OUTPOST_VERSION__ : "dev";
+
+// Resolved at bundle time (not from the SDK's runtime VERSION, which walks up
+// from __dirname for package.json and resolves the wrong file inside a SEA
+// bundle). `typeof` guard lets source runs fall back to "dev".
+declare const __PI_SDK_VERSION__: string;
+const PI_SDK_VERSION = typeof __PI_SDK_VERSION__ === "string" ? __PI_SDK_VERSION__ : "dev";
 
 // npm workspace scripts run with cwd=server/ — INIT_CWD is where `npm run` was invoked
 const LAUNCH_DIR = process.env.INIT_CWD ?? process.cwd();
@@ -366,6 +371,10 @@ const hasIndexHtml = (candidate: string) =>
 const webDistCandidates = process.env.PI_OUTPOST_WEB_DIST
   ? [path.resolve(process.env.PI_OUTPOST_WEB_DIST)]
   : [
+      // Prefer the production build (Vite output) over the source web/ directory,
+      // which contains a Vite-dev index.html referencing /src/main.tsx — that file
+      // would be served as application/octet-stream and fail ESM module loading.
+      path.resolve(import.meta.dirname, "./web/dist"),
       path.resolve(import.meta.dirname, "./web"),
       path.resolve(import.meta.dirname, "../../web/dist"),
     ];

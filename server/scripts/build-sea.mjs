@@ -16,6 +16,7 @@
  */
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,8 @@ const require = createRequire(import.meta.url);
 const SERVER_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPO_ROOT = resolve(SERVER_DIR, "..");
 const { version } = require(resolve(REPO_ROOT, "cli/package.json"));
+const piSdkMain = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+const piSdkVersion = JSON.parse(readFileSync(resolve(dirname(piSdkMain), "..", "package.json"), "utf-8")).version;
 const OUT_DIR = resolve(SERVER_DIR, "dist");
 const BUNDLE_PATH = resolve(OUT_DIR, "bundle.mjs");
 const SEA_CONFIG_PATH = resolve(OUT_DIR, "sea-config.json");
@@ -53,7 +56,7 @@ await esbuild.build({
   format: "esm",
   target: "node26",
   outfile: BUNDLE_PATH,
-  define: { __PI_OUTPOST_VERSION__: JSON.stringify(version) },
+  define: { __PI_OUTPOST_VERSION__: JSON.stringify(version), __PI_SDK_VERSION__: JSON.stringify(piSdkVersion) },
   // Dependencies (e.g. cross-spawn) use CJS require() for Node builtins — esbuild's
   // ESM output needs this shim, since plain `import` can't do that at the top level.
   banner: {

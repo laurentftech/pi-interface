@@ -12,6 +12,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { cp, chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
@@ -29,6 +30,8 @@ const WEB_SRC = resolve(REPO_ROOT, "web/dist");
 const WEB_OUT = resolve(OUT_DIR, "web");
 
 const { version } = require(resolve(CLI_DIR, "package.json"));
+const piSdkMain = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+const piSdkVersion = JSON.parse(readFileSync(resolve(dirname(piSdkMain), "..", "package.json"), "utf-8")).version;
 
 // Always rebuild web UI
 console.log("[build] building the web UI …");
@@ -53,7 +56,7 @@ await esbuild.build({
     "fastify",
     "ws",
   ],
-  define: { __PI_OUTPOST_VERSION__: JSON.stringify(version) },
+  define: { __PI_OUTPOST_VERSION__: JSON.stringify(version), __PI_SDK_VERSION__: JSON.stringify(piSdkVersion) },
   banner: {
     js: [
       "#!/usr/bin/env node",
@@ -73,7 +76,7 @@ await esbuild.build({
   format: "esm",
   target: "node26",
   outfile: SEA_BUNDLE,
-  define: { __PI_OUTPOST_VERSION__: JSON.stringify(version) },
+  define: { __PI_OUTPOST_VERSION__: JSON.stringify(version), __PI_SDK_VERSION__: JSON.stringify(piSdkVersion) },
   banner: {
     js: [
       "#!/usr/bin/env node",
